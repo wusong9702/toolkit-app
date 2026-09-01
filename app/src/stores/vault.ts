@@ -58,6 +58,29 @@ function uid(): string {
 const emptyVault = (): VaultData => ({ entries: [], groups: [] })
 
 /**
+ * 多设备冲突合并（条目级）：
+ * - 同一 id 的条目：取 updatedAt 较新的那个（两端各改各的，互不覆盖）
+ * - 仅一端有的条目：直接保留
+ * - 分组名：取并集
+ *
+ * 已知限制：删除不会跨设备传播——A 删了条目并同步后，B 本地若还留着
+ * 该条，合并时会把它带回来。所以「删除」请在两台设备都同步后操作，
+ * 或直接在本机删完并确认同步成功，再在另一台设备拉取。
+ */
+function mergeVaults(local: VaultData, remote: VaultData): VaultData {
+  const byId = new Map<string, VaultEntry>()
+  const put = (e: VaultEntry) => {
+    const cur = byId.get(e.id)
+    if (!cur || (e.updatedAt || 0) >= (cur.updatedAt || 0)) byId.set(e.id, e)
+  }
+  ;(local.entries || []).forEach(put)
+  ;(remote.entries || []).forEach(put)
+  const entries = Array.from(byId.values()).sort((a, b) => (b.sort || 0) - (a.sort || 0))
+  const groups = Array.from(new Set([...(local.groups || []), ...(remote.groups || [])]))
+  return { entries, groups }
+}
+
+/**
  * 兼容老数据：早期版本保存的条目没有 favorite 字段。
  * 不补默认值的话，界面上读到的会是 undefined，收藏判断就失效了。
  */
@@ -309,11 +332,11 @@ export const useVaultStore = defineStore('vault', () => {
       const remote = await fetchVault(webdavConfig.value)
       if (remote && unlocked.value && masterPassword.value) {
         const remoteData = await decryptObject<VaultData>(JSON.parse(remote), masterPassword.value)
-        // 合并：以远端为准（简单策略；后续可做成冲突合并）
-        data.value = remoteData
+        // 条目级合并：两端都改过的取各自较新的版本，不再「远端全量覆盖本地」
+        const merged = mergeVaults(data.value, remoteData)
+        data.value = merged
         syncGroups()
-        const encrypted = await encryptObject(data.value, masterPassword.value)
-        setItem(VAULT_KEY, encrypted)
+        await save() // 合并结果立即落盘并推回云端，保证两端一致
         sync.value = { status: 'pulled', lastSyncAt: Date.now() }
         return true
       }
