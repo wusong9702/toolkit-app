@@ -79,6 +79,28 @@ def check_heredocs(script):
     return problems
 
 
+def check_github_expr(node, path=""):
+    """校验 GitHub Actions 表达式语法。
+    目前已知规则：
+    - if: 条件里不能直接用 secrets.XXX（报 Unrecognized named-value: 'secrets'，
+      整个工作流文件判为无效）。官方做法：先注入 env，再判断 env.XXX。
+    """
+    problems = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "if" and isinstance(value, str) and "secrets." in value:
+                problems.append(
+                    f"{path}/if: 条件里直接用了 secrets（{value.strip()}）。"
+                    "GitHub 不允许，请先注入 job 级 env 再判断 env.XXX"
+                )
+            else:
+                problems.extend(check_github_expr(value, f"{path}/{key}"))
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            problems.extend(check_github_expr(value, f"{path}[{index}]"))
+    return problems
+
+
 def main():
     if not WORKFLOWS:
         print("没找到工作流文件")
@@ -100,6 +122,14 @@ def main():
             failed = True
             continue
         print("  ✅ YAML 解析通过")
+
+        expr_problems = check_github_expr(data)
+        if expr_problems:
+            for problem in expr_problems:
+                print(f"  ❌ {problem}")
+            failed = True
+        else:
+            print("  ✅ GitHub Actions 表达式检查通过")
 
         script_count = 0
         for path, script in collect_scripts(data):
