@@ -1,6 +1,6 @@
 # 随身工具箱 · 跨平台应用
 
-一套代码，同时产出 **网页版 / Android / iOS**。
+一套代码，同时产出 **网页版 / Android**（iOS 端暂不纳入范围）。
 
 技术栈：Vue 3 + Vite + Vant 4 + Pinia + Capacitor 7。
 
@@ -29,7 +29,6 @@ npm run dev
 | `npm run preview` | 本地预览构建结果 |
 | `npm run typecheck` | 类型检查 |
 | `npm run android:init` | 生成 Android 原生工程 |
-| `npm run ios:init` | 生成 iOS 原生工程 |
 | `npm run cap:sync` | 构建网页并同步到原生工程 |
 | `npm run android:bundle` | 一键打 Android 上架包（AAB） |
 
@@ -74,7 +73,7 @@ app/src/
   随机密码生成、失效时间、收藏、分组/标签、**触屏拖拽排序**、条目级多设备冲突合并
 - **账号本子风格扩展**（v1.1.0）：
   - **自定义字段**：每条目可附加任意键值（手机号 / 密保 / 链接等），敏感字段可标记「隐藏」
-  - **TOTP 动态验证码**：保存 base32 密钥，列表页实时显示 6 位动态码与倒计时（RFC 6238，兼容 Google Authenticator）
+  - **TOTP 动态验证码**：保存密钥，列表页实时显示动态码与倒计时；支持「通用验证器」（base32，RFC 6238，兼容 Google Authenticator / 1Password）与「Steam 令牌」（base64 shared_secret，对标 Steam Guard 手机令牌）
   - **顶部全字段搜索**：名称 / 密码 / 备注 / 标签 / 自定义字段 / TOTP 密钥一处搜全
   - **A-Z 字母定位条**：右侧字母栏一键跳到对应拼音首字母分组（中文按拼音）
   - **指纹 / 面容解锁**：原生 App 内可用生物识别代替主密码解锁（密钥存于系统安全存储）
@@ -108,7 +107,8 @@ appName: '工具箱',              // 改成你的应用名
 
 **3. 改主题色**
 
-`app/src/styles/global.css` 和 `vite.config.ts` 里的 `#1989fa`（Vant 默认蓝）。
+应用内「设置 → 外观」可直接切换深色模式与强调色（蓝/绿/橙/红/紫/青），无需改代码。
+如需改默认色，可改 `app/src/styles/global.css` 与 `vite.config.ts` 里的 `#1989fa`（Vant 默认蓝）。
 
 ---
 
@@ -116,4 +116,4 @@ appName: '工具箱',              // 改成你的应用名
 
 - [01-技术方案.md](docs/01-技术方案.md) —— 选型理由、路线图、成本清单
 - [02-GitHub与自动构建.md](docs/02-GitHub与自动构建.md) —— 连 GitHub 与自动部署
-- [03-发布上架操作手册.md](docs/03-发布上架操作手册.md) —— 双端打包上架全流程
+- [03-发布上架操作手册.md](docs/03-发布上架操作手册.md) —— Android 打包上架全流程

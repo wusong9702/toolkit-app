@@ -100,6 +100,7 @@
             @click="copyText(totpMap[entry.id].code, '动态码')"
           >
             <van-icon name="clock-o" class="row-icon" />
+            <van-tag v-if="entry.totpType === 'steam'" type="primary" plain class="totp-steam-tag">Steam</van-tag>
             <span class="totp-code">{{ totpMap[entry.id].code }}</span>
             <van-circle
               :current-rate="(totpMap[entry.id].remaining / 30) * 100"
@@ -167,7 +168,7 @@ import Sortable from 'sortablejs'
 import { useVaultStore, type VaultEntry } from '@/stores/vault'
 import { copySecret } from '@/utils/clipboard'
 import { matchEntry } from '@/utils/search'
-import { currentTOTP } from '@/utils/totp'
+import { currentTotpByType } from '@/utils/totp'
 import { indexLetter, ALPHABET } from '@/utils/pinyin-index'
 
 const vault = useVaultStore()
@@ -228,7 +229,7 @@ async function refreshTotp() {
   const map: Record<string, { code: string; remaining: number }> = {}
   for (const e of visibleEntries.value) {
     if (e.totp) {
-      const r = await currentTOTP(e.totp)
+      const r = await currentTotpByType(e.totp, e.totpType)
       if (r) map[e.id] = r
     }
   }
@@ -575,6 +576,9 @@ const syncClass = computed(() => {
   font-weight: 700;
   letter-spacing: 3px;
   color: #07c160;
+}
+.totp-steam-tag {
+  flex-shrink: 0;
 }
 .totp-circle {
   margin-left: auto;

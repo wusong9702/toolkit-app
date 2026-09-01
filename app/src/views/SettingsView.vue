@@ -67,6 +67,33 @@
       />
     </div>
 
+    <!-- 外观：深色模式 + 强调色 -->
+    <div class="card">
+      <div class="section-label">外观</div>
+      <van-cell title="深色模式" label="深色背景，夜间更护眼">
+        <template #right-icon>
+          <van-switch v-model="darkOn" @change="onDarkChange" />
+        </template>
+      </van-cell>
+      <div class="accent-block">
+        <div class="accent-label">强调色</div>
+        <div class="accent-row">
+          <button
+            v-for="c in accentPresets"
+            :key="c.value"
+            class="accent-dot"
+            :class="{ active: c.value.toLowerCase() === ui.accent.toLowerCase() }"
+            :style="{ background: c.value }"
+            type="button"
+            @click="onPickAccent(c.value)"
+          >
+            <van-icon v-if="c.value.toLowerCase() === ui.accent.toLowerCase()" name="success" />
+          </button>
+        </div>
+      </div>
+      <p class="hint">应用主色用于按钮、标签栏与选中态。深色与强调色会自动保存。</p>
+    </div>
+
     <!-- 备份：CSV 导出 -->
     <div class="card">
       <div class="section-label">备份</div>
@@ -101,7 +128,7 @@
       <div class="section-label">关于</div>
       <p class="hint">
         本地密码本：数据端到端加密（AES-256-GCM），支持 WebDAV 云备份。
-        同一套代码，既能当网页用，也能打包成 iOS / Android 应用。
+        同一套代码，既能当网页用，也能打包成 Android 应用。
       </p>
     </div>
 
@@ -121,10 +148,20 @@
 import { computed, onMounted, ref } from 'vue'
 import { showConfirmDialog, showToast } from 'vant'
 import { useVaultStore } from '@/stores/vault'
+import { useUiStore, ACCENT_PRESETS } from '@/stores/ui'
 import { testConnection, type ConnectionTestResult } from '@/utils/webdav'
 import { entriesToCSV, downloadCSV } from '@/utils/csv'
 
 const vault = useVaultStore()
+const ui = useUiStore()
+const accentPresets = ACCENT_PRESETS
+const darkOn = ref(ui.isDark)
+function onDarkChange(on: boolean) {
+  ui.setTheme(on ? 'dark' : 'light')
+}
+function onPickAccent(c: string) {
+  ui.setAccent(c)
+}
 
 // 密码本 WebDAV 配置
 const davUrl = ref(vault.webdavConfig.url)
@@ -348,5 +385,39 @@ onMounted(async () => {
   color: #ee0a24;
   font-size: 13px;
   margin: 8px 0 0;
+}
+/* 强调色选择 */
+.accent-block {
+  margin-top: 8px;
+}
+.accent-label {
+  font-size: 13px;
+  color: #969799;
+  margin-bottom: 10px;
+}
+.accent-row {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.accent-dot {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  padding: 0;
+  transition: transform 0.12s ease;
+}
+.accent-dot.active {
+  border-color: #323233;
+  transform: scale(1.12);
+}
+html.dark .accent-dot.active {
+  border-color: #e6e6e6;
 }
 </style>

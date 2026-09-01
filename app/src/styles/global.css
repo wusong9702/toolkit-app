@@ -1,7 +1,34 @@
 /* 全局样式：只放最基础的，其余交给 Vant */
+
+/* ---------- 主题变量（浅色为默认；深色在 html.dark 下覆盖） ---------- */
 :root {
   --app-safe-bottom: env(safe-area-inset-bottom, 0px);
   --app-page-bg: #f7f8fa;
+  --app-card-bg: #ffffff;
+  --app-card-border: #ebedf0;
+  --app-text: #323233;
+  --app-text-2: #969799;
+  --app-row-bg: #f7f8fa;
+  --app-chip-bg: #e8f3ff;
+  --app-chip-text: #1989fa;
+  --app-tag-bg: #f0f9eb;
+  --app-tag-text: #07c160;
+  --app-divider: #f2f3f5;
+}
+
+html.dark {
+  --app-page-bg: #121212;
+  --app-card-bg: #1e1e1e;
+  --app-card-border: #2c2c2c;
+  --app-text: #e6e6e6;
+  --app-text-2: #9a9a9a;
+  --app-row-bg: #242424;
+  --app-chip-bg: #1f2a3a;
+  --app-chip-text: #5aa9ff;
+  --app-tag-bg: #18301f;
+  --app-tag-text: #4cd07d;
+  --app-divider: #2a2a2a;
+  color-scheme: dark;
 }
 
 * {
@@ -17,7 +44,7 @@ body,
 
 body {
   background: var(--app-page-bg);
-  color: #323233;
+  color: var(--app-text);
   font-size: 14px;
   line-height: 1.5;
 }
@@ -33,14 +60,14 @@ body {
   padding: 16px 16px 8px;
   font-size: 20px;
   font-weight: 600;
-  color: #323233;
+  color: var(--app-text);
 }
 
 .page-desc {
   margin: 0 0 12px;
   padding: 0 16px;
   font-size: 13px;
-  color: #969799;
+  color: var(--app-text-2);
 }
 
 /* 通用卡片 */
@@ -48,7 +75,7 @@ body {
   margin: 12px;
   padding: 16px;
   border-radius: 12px;
-  background: #fff;
+  background: var(--app-card-bg);
   box-shadow: 0 1px 4px rgba(100, 101, 102, 0.08);
 }
 
@@ -58,4 +85,76 @@ body {
   text-align: center;
   color: #c8c9cc;
   font-size: 14px;
+}
+
+/* ---------- 深色模式：覆盖各组件里的固定颜色 ---------- */
+/* 这些组件样式是 scoped 的，这里用 html.dark 提升优先级统一覆盖，
+   让「深色模式」不只是 Vant 组件变黑，自定义卡片/文字也跟着变。 */
+html.dark body {
+  background: var(--app-page-bg);
+  color: var(--app-text);
+}
+html.dark .page-title,
+html.dark .section-label {
+  color: var(--app-text) !important;
+}
+html.dark .hint {
+  color: var(--app-text-2) !important;
+}
+html.dark .card,
+html.dark .entry-card {
+  background: var(--app-card-bg) !important;
+  border-color: var(--app-card-border) !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4) !important;
+}
+html.dark .entry-name,
+html.dark .pwd-text,
+html.dark .field-value,
+html.dark .group-chip,
+html.dark .note-text {
+  color: var(--app-text) !important;
+}
+html.dark .entry-row,
+html.dark .entry-field,
+html.dark .totp-preview,
+html.dark .test-result,
+html.dark .sync-status {
+  background: var(--app-row-bg) !important;
+}
+html.dark .group-chip {
+  background: var(--app-chip-bg) !important;
+  color: var(--app-chip-text) !important;
+}
+html.dark .tag-chip {
+  background: var(--app-tag-bg) !important;
+  color: var(--app-tag-text) !important;
+}
+html.dark .az-bar {
+  background: rgba(30, 30, 30, 0.85) !important;
+}
+html.dark .az-letter {
+  color: var(--app-chip-text) !important;
+}
+html.dark .az-letter.dim {
+  color: #555 !important;
+}
+html.dark .test-ok {
+  background: #14251a !important;
+  color: var(--app-tag-text) !important;
+}
+html.dark .test-fail {
+  background: #2a1718 !important;
+  color: #ff6b6b !important;
+}
+html.dark .meta {
+  border-top-color: var(--app-divider) !important;
+  color: #777 !important;
+}
+html.dark .no-sync {
+  background: #2a2415 !important;
+  color: #e0a060 !important;
+}
+html.dark .van-cell,
+html.dark .van-field__control {
+  color: var(--app-text) !important;
 }

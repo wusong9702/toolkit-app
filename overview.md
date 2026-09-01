@@ -1,7 +1,7 @@
 # 跨平台应用方案 · 交付概览
 
 **日期**：2026-09-01
-**需求**：开发支持 iOS + Android 的工具类应用，用户为零基础新手，需后续连接 GitHub 并完成打包发布
+**需求**：开发密码管理器类应用（Android + 网页），用户为零基础新手，需后续连接 GitHub 并完成打包发布（iOS 端已移出范围）
 
 ---
 
@@ -15,8 +15,7 @@
 
 1. 网页版跑通（已完成脚手架）
 2. 连 GitHub + 自动部署
-3. 打包 Android
-4. 打包 iOS + 上架
+3. 打包 Android（iOS 端已移出范围，暂不纳入）
 
 ---
 
@@ -65,7 +64,7 @@
 
 - `deploy-web.yml` —— 推 main 自动部署 GitHub Pages
 - `build-android.yml` —— 打标签自动出 APK/AAB，支持签名配置
-- `build-ios.yml` —— macOS runner 云构建 IPA，解决 Windows 无法构建 iOS 的问题
+- `deploy-web.yml` —— 推 main 自动部署 GitHub Pages（iOS 端已移出范围，build-ios.yml 已删除）
 
 ### 4. 操作文档
 
@@ -150,7 +149,7 @@
 
 ## 七、风险提示
 
-1. iOS 打包必须有 macOS 环境，已通过 GitHub Actions 云 Mac 方案解决，但需用户配置 5 个 Secrets
+1. iOS 端已移出范围（2026-09-01 晚决定），仅做 Android + 网页；如将来要做，云 Mac 方案与签名经验仍在记忆中可恢复
 2. Android 签名密钥（.jks）一旦丢失将无法再发布更新，必须多处备份
 3. Apple 审核拒审率不低，工具类应用易因"功能过于简单"被拒，功能需做扎实
 4. 网页套壳应用需具备实质离线能力，否则 Apple 会拒审——脚手架已在架构层面处理
@@ -174,7 +173,7 @@
 
 - ✅ 网页版：https://wusong9702.github.io/toolkit-app/ 可访问
 - ✅ Android：正式签名 APK 已可下载安装（自用，不上架）
-- ⏸️ iOS：打包暂停中（workflow 已改仅手动触发）
+- 🚫 iOS：已移出范围（v1.1.0 起仅 Android + 网页，build-ios.yml 已删除）
 - ✅ 密码本安全加固：生成密码越界 bug 修复、复制后 30 秒自动清空剪贴板
 - ✅ WebDAV 多设备冲突合并（条目级，两端各改各的取较新版本）
 - ✅ 触屏拖拽排序（SortableJS + 拖拽把手）

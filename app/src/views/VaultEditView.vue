@@ -33,16 +33,25 @@
       </div>
     </div>
 
-    <!-- TOTP 动态验证码 -->
+    <!-- 动态验证码：通用 TOTP / Steam 令牌 -->
     <div class="card">
-      <div class="section-label">TOTP 动态验证码（可选）</div>
+      <div class="section-label">动态验证码（TOTP，可选）</div>
+      <van-radio-group v-model="form.totpType" direction="horizontal" class="totp-type">
+        <van-radio name="standard">通用验证器</van-radio>
+        <van-radio name="steam">Steam 令牌</van-radio>
+      </van-radio-group>
       <van-field
         v-model="form.totp"
-        label="密钥"
-        placeholder="粘贴 base32 密钥，如 JBSWY3DPEHPK3PXP"
+        :label="form.totpType === 'steam' ? 'base64 密钥' : 'base32 密钥'"
+        :placeholder="
+          form.totpType === 'steam'
+            ? '粘贴 Steam 导出的 base64 密钥'
+            : '粘贴 base32 密钥，如 JBSWY3DPEHPK3PXP'
+        "
         :error-message="totpError"
       />
       <div v-if="totpPreview" class="totp-preview">
+        <van-tag v-if="form.totpType === 'steam'" type="primary" plain class="totp-tag">Steam</van-tag>
         <span class="totp-code">{{ totpPreview.code }}</span>
         <van-circle
           :current-rate="(totpPreview.remaining / 30) * 100"
@@ -53,7 +62,13 @@
         />
       </div>
       <p class="hint">
-        保存后，列表页会实时显示 6 位动态码与倒计时（兼容 Google Authenticator / 1Password 等标准 TOTP）。
+        <template v-if="form.totpType === 'steam'">
+          保存 Steam 的 shared_secret（base64）后，列表页实时显示 5 位 Steam Guard 令牌与倒计时，对标 Steam
+          手机令牌。
+        </template>
+        <template v-else>
+          保存后，列表页会实时显示 6 位动态码与倒计时（兼容 Google Authenticator / 1Password 等标准 TOTP）。
+        </template>
       </p>
     </div>
 
@@ -191,7 +206,12 @@ import { showToast } from 'vant'
 import { useVaultStore, type VaultEntry, type CustomField } from '@/stores/vault'
 import { generatePassword } from '@/utils/crypto'
 import { copySecret } from '@/utils/clipboard'
-import { currentTOTP, isValidBase32 } from '@/utils/totp'
+import {
+  currentTotpByType,
+  isValidBase32,
+  isValidSteamSecret,
+  type TotpType,
+} from '@/utils/totp'
 
 const vault = useVaultStore()
 const route = useRoute()
@@ -207,6 +227,7 @@ const form = ref({
   note: '',
   fields: [] as CustomField[],
   totp: '',
+  totpType: 'standard' as TotpType,
 })
 /** 自定义字段的「显示/隐藏」开关（不入库，仅界面用） */
 const fieldReveal = ref<Record<number, boolean>>({})
@@ -234,6 +255,7 @@ if (isEdit.value) {
     form.value.note = e.note
     form.value.fields = (e.fields || []).map((f) => ({ ...f }))
     form.value.totp = e.totp || ''
+    form.value.totpType = e.totpType === 'steam' ? 'steam' : 'standard'
     if (e.expiresAt) {
       neverExpire.value = false
       const d = new Date(e.expiresAt)
@@ -276,18 +298,24 @@ function onAddField() {
 /* ---------- TOTP 实时预览 ---------- */
 const totpPreview = ref<{ code: string; remaining: number } | null>(null)
 let totpTimer: ReturnType<typeof setInterval> | null = null
-const totpValid = computed(() => isValidBase32(form.value.totp))
-const totpError = computed(() =>
-  form.value.totp.trim() && !totpValid.value
-    ? '密钥格式不正确（应为 base32，仅含 A-Z 与 2-7）'
-    : '',
+const totpValid = computed(() =>
+  form.value.totpType === 'steam'
+    ? isValidSteamSecret(form.value.totp)
+    : isValidBase32(form.value.totp),
 )
+const totpError = computed(() => {
+  if (!form.value.totp.trim()) return ''
+  if (totpValid.value) return ''
+  return form.value.totpType === 'steam'
+    ? '密钥格式不正确（应为 Steam 导出的 base64 字符串）'
+    : '密钥格式不正确（应为 base32，仅含 A-Z 与 2-7）'
+})
 async function refreshTotpPreview() {
   if (!totpValid.value) {
     totpPreview.value = null
     return
   }
-  totpPreview.value = await currentTOTP(form.value.totp)
+  totpPreview.value = await currentTotpByType(form.value.totp, form.value.totpType)
   if (!totpTimer) totpTimer = setInterval(() => void refreshTotpPreview(), 1000)
 }
 watch(() => form.value.totp, () => void refreshTotpPreview())
@@ -340,6 +368,7 @@ async function onSave() {
         expiresAt,
         fields,
         totp,
+        totpType: form.value.totpType,
       })
       showToast('已保存')
     } else {
@@ -353,6 +382,7 @@ async function onSave() {
         favorite: false,
         fields,
         totp,
+        totpType: form.value.totpType,
       })
       if (form.value.group.trim()) vault.addGroup(form.value.group.trim())
       showToast('已新增')
@@ -408,6 +438,12 @@ async function onSave() {
   font-weight: 700;
   letter-spacing: 4px;
   color: #07c160;
+}
+.totp-type {
+  margin-bottom: 10px;
+}
+.totp-tag {
+  margin-right: 6px;
 }
 /* 自定义字段 */
 .field-block {

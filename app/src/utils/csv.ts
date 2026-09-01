@@ -9,14 +9,15 @@ function csvCell(v: string): string {
 
 /** 把全部条目导出为 CSV 文本（带 BOM，Excel 打开中文不乱码） */
 export function entriesToCSV(entries: VaultEntry[]): string {
-  const header = ['名称', '分组', '标签', '密码', 'TOTP密钥', '自定义字段', '备注', '收藏', '失效时间']
+  const header = ['名称', '分组', '标签', '密码', 'TOTP密钥', '动态码类型', '自定义字段', '备注', '收藏', '失效时间']
   const rows = entries.map((e) => {
     const tags = (e.tags || []).join('|')
     const fields = (e.fields || [])
       .map((f) => `${f.label}=${f.value}`)
       .join(';')
     const expire = e.expiresAt ? new Date(e.expiresAt).toISOString() : ''
-    return [e.name, e.group, tags, e.password, e.totp, fields, e.note, e.favorite ? '是' : '否', expire]
+    const totpType = e.totpType === 'steam' ? 'Steam' : '标准'
+    return [e.name, e.group, tags, e.password, e.totp, totpType, fields, e.note, e.favorite ? '是' : '否', expire]
       .map(csvCell)
       .join(',')
   })

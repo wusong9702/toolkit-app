@@ -46,6 +46,8 @@ export interface VaultEntry {
   fields: CustomField[]
   /** TOTP 密钥（base32，RFC 6238）。空字符串 = 无动态码 */
   totp: string
+  /** 动态码类型：standard=通用 TOTP（Google 验证器等）；steam=Steam Guard 令牌（base64 密钥） */
+  totpType: 'standard' | 'steam'
 }
 
 /** 密码库整体（数组 + 分组元信息） */
@@ -114,6 +116,7 @@ function normalize(data: VaultData): VaultData {
             }))
         : [],
       totp: typeof e.totp === 'string' ? e.totp : '',
+      totpType: e.totpType === 'steam' ? 'steam' : 'standard',
     })),
   }
 }
