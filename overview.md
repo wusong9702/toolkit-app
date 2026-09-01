@@ -154,3 +154,33 @@
 2. Android 签名密钥（.jks）一旦丢失将无法再发布更新，必须多处备份
 3. Apple 审核拒审率不低，工具类应用易因"功能过于简单"被拒，功能需做扎实
 4. 网页套壳应用需具备实质离线能力，否则 Apple 会拒审——脚手架已在架构层面处理
+
+---
+
+## 八、最新进展（2026-09-01 晚 · Android 正式签名包构建跑通 ✅）
+
+**里程碑**：`v1.0.0` 标签触发的 GitHub Actions 构建**首次全流程成功**
+（run [33516716252](https://github.com/wusong9702/toolkit-app/actions/runs/33516716252)），
+产出 `android-build` 安装包（6.15MB，含正式签名 `app-release.apk` + `app-release.aab`）。
+
+### 本次修复的问题（提交 314064f）
+
+| 问题 | 根因 | 修复 |
+|---|---|---|
+| `npm ci` 在 CI 上 31 秒失败 | lock 文件 `resolved` 全指向国内镜像 `registry.npmmirror.com`，GitHub 美国构建机拉包超时 | npm ci 加 `--registry=https://registry.npmjs.org --replace-registry-host=always` |
+| `npx cap add android` 依赖临时下载 | package.json 漏了 `@capacitor/android` 依赖 | 补装 `@capacitor/android@^7.6.9`，并把 `app/android/` 平台目录提交进仓库 |
+
+### 当前状态
+
+- ✅ 网页版：https://wusong9702.github.io/toolkit-app/ 可访问
+- ✅ Android：正式签名 APK 已可下载安装（自用，不上架）
+- ⏸️ iOS：打包暂停中（workflow 已改仅手动触发）
+- 📌 待办：用户下载 APK 装到手机实测；真机 WebDAV 同步实测
+
+### 用户的下一步（下载安装 APK）
+
+1. 打开 https://github.com/wusong9702/toolkit-app/actions/runs/33516716252
+2. 页面底部 **Artifacts** 区下载 `android-build`（zip）
+3. 解压得到 `app-release.apk`，传到手机（微信/QQ/数据线/网盘均可）
+4. 手机点击安装，提示"未知来源"时允许（自签名应用的正常提示）
+5. 打开 App 设置主密码 + 配置 WebDAV，即可与网页版数据互通
