@@ -35,6 +35,20 @@ npm run dev
 
 ---
 
+## 安装到手机（Android）
+
+云端自动构建，出的是**正式签名包**（以后更新直接覆盖安装，不丢数据）：
+
+1. 打开仓库的 **Actions** 页面 → 最新一次「构建 Android 安装包」运行
+2. 页面底部 **Artifacts** 区下载 `android-build`（zip）
+3. 解压得到 `app-release.apk`，传到手机（微信/QQ/数据线/网盘均可）
+4. 手机点击安装，提示"未知来源"时选**允许**（自签名应用正常提示）
+5. 打开 App → 设置主密码 + 配置 WebDAV，即可与网页版数据互通
+
+> 想重新构建：在 Actions 页面手动触发（选 debug 或 release），或打一个新标签 `git tag v1.0.1 && git push origin v1.0.1`。
+
+---
+
 ## 目录说明
 
 ```

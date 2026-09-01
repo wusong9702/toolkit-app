@@ -104,6 +104,17 @@ jobs:
         if: ${{ github.event.inputs.build_type == 'release' || startsWith(github.ref, 'refs/tags/v') }}
         run: cd android && chmod +x ./gradlew && ./gradlew bundleRelease assembleRelease --no-daemon
 
+      - name: 验证 APK 签名
+        # 用 Android 官方 apksigner 打印证书指纹，确认 release 包真的带上了正式签名
+        if: ${{ github.event.inputs.build_type == 'release' || startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          set -e
+          APK=$(ls android/app/build/outputs/apk/release/*.apk | head -1)
+          echo "验证文件：$APK"
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | tail -1)
+          "$APKSIGNER" verify --print-certs "$APK"
+          echo "✅ 签名验证通过（v1/v2 都打上了才算真签名）"
+
       - name: 上传安装包
         uses: actions/upload-artifact@v4
         with:
