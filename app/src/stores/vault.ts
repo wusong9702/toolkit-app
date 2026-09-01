@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { getItem, setItem } from './storage'
-import { encryptObject, decryptObject } from '@/utils/crypto'
+import { encryptObject, decryptObject, passwordStrength } from '@/utils/crypto'
 import {
   ensureDir,
   fetchVault,
@@ -42,6 +42,8 @@ export interface VaultEntry {
   createdAt: number
   /** 更新时间（ms） */
   updatedAt: number
+  /** 删除时间戳（ms）；>0 表示已移入回收站（软删除），0 表示正常 */
+  deletedAt: number
   /** 自定义字段（账号本子风格：可附加任意键值） */
   fields: CustomField[]
   /** TOTP 密钥（base32，RFC 6238）。空字符串 = 无动态码 */
@@ -106,6 +108,7 @@ function normalize(data: VaultData): VaultData {
       favorite: e.favorite === true,
       tags: Array.isArray(e.tags) ? e.tags : [],
       sort: typeof e.sort === 'number' ? e.sort : 0,
+      deletedAt: typeof e.deletedAt === 'number' && e.deletedAt > 0 ? e.deletedAt : 0,
       fields: Array.isArray(e.fields)
         ? e.fields
             .filter((f) => f && typeof f.label === 'string')
@@ -184,11 +187,8 @@ export const useVaultStore = defineStore('vault', () => {
   /** 是否已在系统安全存储里保存了主密码（解锁后可用生物识别） */
   const hasBiometricSecret = ref(getItem<boolean>('hasBiometricSecret', false))
 
-  /** 有失效时间的条目（用于界面标记） */
-  const expiringEntries = computed(
-    () =>
-      data.value.entries.filter((e) => e.expiresAt > 0).length,
-  )
+  /** 有失效时间的条目（用于界面标记，不含回收站） */
+  const expiringEntries = computed(() => activeEntries.value.filter((e) => e.expiresAt > 0).length)
 
   /* ---------- 加解锁 ---------- */
   /** 首次设置主密码（初始化） */
@@ -265,7 +265,9 @@ export const useVaultStore = defineStore('vault', () => {
 
   /* ---------- 条目 CRUD ---------- */
   function addEntry(
-    payload: Omit<VaultEntry, 'id' | 'createdAt' | 'updatedAt' | 'sort'> & { sort?: number },
+    payload: Omit<VaultEntry, 'id' | 'createdAt' | 'updatedAt' | 'sort' | 'deletedAt'> & {
+      sort?: number
+    },
   ): VaultEntry {
     const entry: VaultEntry = {
       ...payload,
@@ -273,6 +275,7 @@ export const useVaultStore = defineStore('vault', () => {
       createdAt: Date.now(),
       updatedAt: Date.now(),
       sort: payload.sort ?? Date.now(),
+      deletedAt: 0,
     }
     data.value.entries.unshift(entry)
     syncGroups()
@@ -288,10 +291,42 @@ export const useVaultStore = defineStore('vault', () => {
     save()
   }
 
-  function removeEntry(id: string): void {
+  /** 软删除：移入回收站（保留数据，可恢复） */
+  function trash(id: string): void {
+    const e = data.value.entries.find((x) => x.id === id)
+    if (!e) return
+    e.deletedAt = Date.now()
+    e.updatedAt = Date.now()
+    syncGroups()
+    save()
+  }
+
+  /** 从回收站恢复 */
+  function restore(id: string): void {
+    const e = data.value.entries.find((x) => x.id === id)
+    if (!e) return
+    e.deletedAt = 0
+    e.updatedAt = Date.now()
+    save()
+  }
+
+  /** 彻底删除（回收站里点「彻底删除」或清空时用） */
+  function purge(id: string): void {
     data.value.entries = data.value.entries.filter((e) => e.id !== id)
     syncGroups()
     save()
+  }
+
+  /** 清空回收站（所有软删除条目彻底删除） */
+  function emptyTrash(): void {
+    data.value.entries = data.value.entries.filter((e) => !e.deletedAt)
+    syncGroups()
+    save()
+  }
+
+  /** 硬删除（保留向后兼容，内部等同于 purge） */
+  function removeEntry(id: string): void {
+    purge(id)
   }
 
   /** 切换收藏状态（收藏的条目固定显示在主页顶部） */
@@ -351,10 +386,18 @@ export const useVaultStore = defineStore('vault', () => {
   }
 
   /* ---------- 展示用派生 ---------- */
+  /** 正常条目（未移入回收站）。所有对外展示的列表都基于它，避免回收站内容混入 */
+  const activeEntries = computed(() => data.value.entries.filter((e) => !e.deletedAt))
+
+  /** 回收站里的条目（软删除，deletedAt > 0），按删除时间倒序 */
+  const trashEntries = computed(() =>
+    data.value.entries.filter((e) => e.deletedAt > 0).sort((a, b) => b.deletedAt - a.deletedAt),
+  )
+
   /** 按分组聚合的条目 */
   const groupedEntries = computed(() => {
     const groups = new Map<string, VaultEntry[]>()
-    data.value.entries.forEach((e) => {
+    activeEntries.value.forEach((e) => {
       const key = e.group || '未分组'
       if (!groups.has(key)) groups.set(key, [])
       groups.get(key)!.push(e)
@@ -362,20 +405,38 @@ export const useVaultStore = defineStore('vault', () => {
     return Array.from(groups.entries()).sort((a, b) => (a[0] === '未分组' ? 1 : b[0] === '未分组' ? -1 : a[0].localeCompare(b[0])))
   })
 
-  /** 总条目数 */
-  const totalEntries = computed(() => data.value.entries.length)
+  /** 总条目数（不含回收站） */
+  const totalEntries = computed(() => activeEntries.value.length)
 
   /** 收藏的条目（主页「我的收藏」区） */
-  const favoriteEntries = computed(() => data.value.entries.filter((e) => e.favorite))
+  const favoriteEntries = computed(() => activeEntries.value.filter((e) => e.favorite))
 
   /** 每个分组/标签下的条目数（主页分组区角标用） */
   const groupCounts = computed(() => {
     const counts = new Map<string, number>()
-    data.value.entries.forEach((e) => {
+    activeEntries.value.forEach((e) => {
       if (e.group) counts.set(e.group, (counts.get(e.group) || 0) + 1)
       e.tags.forEach((t) => counts.set(t, (counts.get(t) || 0) + 1))
     })
     return counts
+  })
+
+  /** 安全统计（安全中心用）：弱密码 / 重复密码 / 已失效 */
+  const securityStats = computed(() => {
+    const list = activeEntries.value
+    const weak = list.filter((e) => e.password && passwordStrength(e.password).score <= 1).length
+    // 重复密码：同一明文出现在 >=2 条条目里
+    const byPwd = new Map<string, number>()
+    list.forEach((e) => {
+      if (e.password) byPwd.set(e.password, (byPwd.get(e.password) || 0) + 1)
+    })
+    const reusedSet = new Set<string>()
+    byPwd.forEach((c, pwd) => {
+      if (c >= 2) reusedSet.add(pwd)
+    })
+    const reused = list.filter((e) => e.password && reusedSet.has(e.password)).length
+    const expired = list.filter((e) => e.expiresAt > 0 && Date.now() > e.expiresAt).length
+    return { total: list.length, weak, reused, expired }
   })
 
   /* ---------- 持久化（加密落盘） ---------- */
@@ -573,14 +634,21 @@ export const useVaultStore = defineStore('vault', () => {
     addEntry,
     updateEntry,
     removeEntry,
+    trash,
+    restore,
+    purge,
+    emptyTrash,
     moveEntry,
     toggleFavorite,
     addGroup,
     removeGroup,
     groupedEntries,
+    activeEntries,
+    trashEntries,
     totalEntries,
     favoriteEntries,
     groupCounts,
+    securityStats,
     save,
     pushToWebdav,
     pullFromWebdav,

@@ -24,8 +24,15 @@
           >
             同步
           </van-button>
+          <van-button size="small" icon="delete-o" @click="goTrash">回收站</van-button>
           <van-button size="small" type="primary" icon="plus" @click="onAdd">新增</van-button>
         </div>
+      </div>
+
+      <!-- 安全中心筛选横幅 -->
+      <div v-if="filter" class="filter-banner">
+        <span class="filter-text">{{ FILTER_LABEL[filter] || '筛选' }}：{{ visibleEntries.length }} 条</span>
+        <van-button size="mini" plain @click="clearFilter">退出筛选</van-button>
       </div>
 
       <div class="sync-status" v-if="vault.hasWebdav">
@@ -48,8 +55,8 @@
         />
       </div>
 
-      <!-- 分组标签栏（搜索时隐藏） -->
-      <div class="group-bar" v-if="!searching">
+      <!-- 分组标签栏（搜索或筛选时隐藏） -->
+      <div class="group-bar" v-if="!searching && !filter">
         <van-tabs v-model:active="activeGroup" animated swipeable>
           <van-tab v-for="g in groupNames" :key="g" :title="g" />
         </van-tabs>
@@ -169,6 +176,7 @@ import { useVaultStore, type VaultEntry } from '@/stores/vault'
 import { copySecret } from '@/utils/clipboard'
 import { matchEntry } from '@/utils/search'
 import { currentTotpByType } from '@/utils/totp'
+import { passwordStrength } from '@/utils/crypto'
 import { indexLetter, ALPHABET } from '@/utils/pinyin-index'
 
 const vault = useVaultStore()
@@ -178,10 +186,34 @@ const router = useRouter()
 const activeGroup = ref(0)
 const searchKw = ref('')
 
+/** 安全中心筛选：weak / reused / expired（来自首页点击） */
+const filter = computed(() => (route.query.filter as string) || '')
+const FILTER_LABEL: Record<string, string> = {
+  weak: '弱密码',
+  reused: '重复密码',
+  expired: '已失效',
+}
+function securityFiltered(list: VaultEntry[], type: string): VaultEntry[] {
+  if (type === 'weak') return list.filter((e) => e.password && passwordStrength(e.password).score <= 1)
+  if (type === 'reused') {
+    const byPwd = new Map<string, number>()
+    list.forEach((e) => {
+      if (e.password) byPwd.set(e.password, (byPwd.get(e.password) || 0) + 1)
+    })
+    const reusedSet = new Set<string>()
+    byPwd.forEach((c, p) => {
+      if (c >= 2) reusedSet.add(p)
+    })
+    return list.filter((e) => e.password && reusedSet.has(e.password))
+  }
+  if (type === 'expired') return list.filter((e) => e.expiresAt > 0 && Date.now() > e.expiresAt)
+  return list
+}
+
 const groupNames = computed(() => {
   const set = new Set<string>(['全部'])
   vault.data.groups.forEach((g) => set.add(g))
-  vault.data.entries.forEach((e) => {
+  vault.activeEntries.forEach((e) => {
     if (e.group) set.add(e.group)
     e.tags.forEach((t) => set.add(t))
   })
@@ -192,10 +224,13 @@ const searching = computed(() => searchKw.value.trim().length > 0)
 
 const visibleEntries = computed(() => {
   const kw = searchKw.value.trim()
-  if (kw) return vault.data.entries.filter((e) => matchEntry(e, kw))
+  const list = filter.value
+    ? securityFiltered(vault.activeEntries, filter.value)
+    : vault.activeEntries
+  if (kw) return list.filter((e) => matchEntry(e, kw))
   const g = groupNames.value[activeGroup.value]
-  if (!g || g === '全部') return vault.data.entries
-  return vault.data.entries.filter((e) => e.group === g || (e.tags && e.tags.includes(g)))
+  if (!g || g === '全部') return list
+  return list.filter((e) => e.group === g || (e.tags && e.tags.includes(g)))
 })
 
 /* ---------- A-Z 字母定位条 ---------- */
@@ -387,12 +422,20 @@ function onMove(e: VaultEntry, dir: 'top' | 'up' | 'down') {
 
 async function onDelete(e: VaultEntry) {
   try {
-    await showConfirmDialog({ title: '删除条目', message: `确定删除「${e.name}」吗？` })
-    vault.removeEntry(e.id)
-    showToast('已删除')
+    await showConfirmDialog({ title: '删除条目', message: `确定删除「${e.name}」吗？会先移入回收站，可在回收站恢复。` })
+    vault.trash(e.id)
+    showToast('已移入回收站')
   } catch {
     /* 取消 */
   }
+}
+
+function goTrash() {
+  router.push('/trash')
+}
+
+function clearFilter() {
+  router.replace({ path: '/vault' })
 }
 
 async function onPull() {
@@ -434,6 +477,24 @@ const syncClass = computed(() => {
 }
 .search-wrap {
   padding: 8px 8px 0;
+}
+.filter-banner {
+  margin: 0 16px 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #fff7e8;
+  color: #ed6a0c;
+}
+html.dark .filter-banner {
+  background: #2a2415;
+  color: #e0a060;
+}
+.filter-text {
+  font-weight: 600;
 }
 .sync-status {
   margin: 0 16px 12px;

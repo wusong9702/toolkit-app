@@ -31,6 +31,21 @@
         <van-button size="small" plain type="primary" @click="onGenPwd">随机生成</van-button>
         <van-button size="small" plain @click="onCopy(form.password)">复制密码</van-button>
       </div>
+      <!-- 密码强度（实时评估） -->
+      <div v-if="form.password" class="pwd-strength">
+        <div class="pwd-strength-bar">
+          <div
+            class="pwd-strength-fill"
+            :style="{ width: pwdStrength.percent + '%', background: pwdStrength.color }"
+          />
+        </div>
+        <div class="pwd-strength-meta">
+          <span class="pwd-strength-label" :style="{ color: pwdStrength.color }">
+            强度：{{ pwdStrength.label }}
+          </span>
+          <span class="pwd-strength-tip">{{ pwdStrength.suggestions.join('；') }}</span>
+        </div>
+      </div>
     </div>
 
     <!-- 动态验证码：通用 TOTP / Steam 令牌 -->
@@ -76,6 +91,19 @@
     <div class="card">
       <div class="section-label">分组 / 标签</div>
       <van-field v-model="form.group" label="分组" placeholder="如：工作 / 生活 / 银行" />
+      <div class="cat-row">
+        <button
+          v-for="c in categoryPresets"
+          :key="c.name"
+          type="button"
+          class="cat-chip"
+          :class="{ active: form.group === c.name }"
+          @click="onPickCategory(c.name)"
+        >
+          <van-icon :name="c.icon" />
+          <span>{{ c.name }}</span>
+        </button>
+      </div>
       <van-field
         v-model="tagInput"
         label="标签"
@@ -204,8 +232,9 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import { useVaultStore, type VaultEntry, type CustomField } from '@/stores/vault'
-import { generatePassword } from '@/utils/crypto'
+import { generatePassword, passwordStrength } from '@/utils/crypto'
 import { copySecret } from '@/utils/clipboard'
+import { CATEGORY_PRESETS } from '@/utils/categories'
 import {
   currentTotpByType,
   isValidBase32,
@@ -216,6 +245,10 @@ import {
 const vault = useVaultStore()
 const route = useRoute()
 const router = useRouter()
+
+const categoryPresets = CATEGORY_PRESETS
+/** 密码强度（实时） */
+const pwdStrength = computed(() => passwordStrength(form.value.password))
 
 const isEdit = computed(() => !!route.query.id)
 
@@ -275,6 +308,11 @@ function onAddTag() {
   if (!t) return
   if (!form.value.tags.includes(t)) form.value.tags.push(t)
   tagInput.value = ''
+}
+
+function onPickCategory(name: string) {
+  // 再次点击同一个则取消，方便清空
+  form.value.group = form.value.group === name ? '' : name
 }
 
 async function onCopy(text: string) {
@@ -421,6 +459,70 @@ async function onSave() {
 }
 .save-row {
   padding: 0 16px 32px;
+}
+/* 密码强度 */
+.pwd-strength {
+  margin-top: 12px;
+}
+.pwd-strength-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: #ebedf0;
+  overflow: hidden;
+}
+html.dark .pwd-strength-bar {
+  background: #333;
+}
+.pwd-strength-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.2s ease, background 0.2s ease;
+}
+.pwd-strength-meta {
+  margin-top: 6px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pwd-strength-label {
+  font-size: 13px;
+  font-weight: 700;
+}
+.pwd-strength-tip {
+  font-size: 12px;
+  color: #969799;
+}
+/* 分类快捷选择 */
+.cat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.cat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid #ebedf0;
+  background: #f7f8fa;
+  font-size: 12px;
+  color: #646566;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+html.dark .cat-chip {
+  background: #242424;
+  border-color: #2c2c2c;
+  color: #c8c9cc;
+}
+.cat-chip.active {
+  border-color: var(--app-chip-text);
+  background: var(--app-chip-bg);
+  color: var(--app-chip-text);
+  font-weight: 600;
 }
 /* TOTP 实时预览 */
 .totp-preview {

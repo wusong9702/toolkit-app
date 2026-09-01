@@ -33,6 +33,150 @@ export function generatePassword(length = 16): string {
   return out
 }
 
+/**
+ * 密码强度评估（账号本子风格：长度 + 字符集多样性 + 重复/序列/常见词 扣分）。
+ * 返回 0~4 分、等级、中文标签、颜色、进度百分比、以及改进建议。
+ */
+export interface PasswordStrength {
+  score: number // 0~4
+  level: 'weak' | 'fair' | 'good' | 'strong'
+  label: string // 弱 / 中 / 强 / 很强
+  color: string
+  percent: number // 0~100
+  suggestions: string[]
+}
+
+const COMMON_WEAK = [
+  'password', '123456', '111111', '123123', 'qwerty', 'abc123',
+  '000000', '1q2w3e', 'admin', 'passw0rd', 'iloveyou', '666666',
+  '888888', '12345678', '123456789', 'a123456', 'password1',
+]
+
+export function passwordStrength(pwd: string): PasswordStrength {
+  if (!pwd) {
+    return { score: 0, level: 'weak', label: '空', color: '#c8c9cc', percent: 0, suggestions: ['请输入密码'] }
+  }
+  const len = pwd.length
+  const lower = /[a-z]/.test(pwd)
+  const upper = /[A-Z]/.test(pwd)
+  const digit = /\d/.test(pwd)
+  const symbol = /[^A-Za-z0-9]/.test(pwd)
+  const variety = [lower, upper, digit, symbol].filter(Boolean).length
+  const suggestions: string[] = []
+  let score = 0
+
+  if (len < 8) suggestions.push('密码太短，至少 8 位')
+  if (len >= 8) score++
+  if (len >= 12) score++
+  if (len >= 16) score++
+  if (variety >= 3) score++
+  else suggestions.push('混合大小写、数字、符号更安全')
+  if (variety === 4) score++
+
+  // 重复字符过多
+  const uniqueRatio = new Set(pwd).size / len
+  if (uniqueRatio < 0.6) {
+    suggestions.push('避免重复字符')
+    score = Math.max(0, score - 1)
+  }
+  // 连续序列（键盘或数字）
+  if (/(?:0123|1234|2345|3456|4567|5678|6789|abcd|bcde|cdef|qwer|asdf|zxcv|password)/i.test(pwd)) {
+    suggestions.push('避免连续序列')
+    score = Math.max(0, score - 1)
+  }
+  // 常见弱密码
+  if (COMMON_WEAK.includes(pwd.toLowerCase())) {
+    score = 0
+    suggestions.push('这是常见弱密码，极易被破解')
+  }
+  // 仅数字或仅字母且偏短
+  if (variety === 1 && len < 12) {
+    suggestions.push('不要只用一种字符')
+    score = Math.max(0, score - 1)
+  }
+
+  score = Math.max(0, Math.min(4, score))
+  const STRONG_MAP = [
+    { label: '弱', color: '#ee0a24' },
+    { label: '弱', color: '#ee0a24' },
+    { label: '中', color: '#ff976a' },
+    { label: '强', color: '#07c160' },
+    { label: '很强', color: '#1989fa' },
+  ]
+  const m = STRONG_MAP[score]
+  if (score >= 3 && suggestions.length === 0) suggestions.push('强度不错，继续保持')
+  return {
+    score,
+    level: (score <= 1 ? 'weak' : score === 2 ? 'fair' : score === 3 ? 'good' : 'strong'),
+    label: m.label,
+    color: m.color,
+    percent: Math.round((score / 4) * 100),
+    suggestions,
+  }
+}
+
+/** 高级随机密码生成（密码生成器页用），可定制长度与字符集 */
+export interface GenOptions {
+  length?: number
+  upper?: boolean
+  lower?: boolean
+  digit?: boolean
+  symbol?: boolean
+  /** 排除易混淆字符（1lI0Oo 等） */
+  excludeSimilar?: boolean
+}
+
+const GEN_SETS = {
+  upper: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+  lower: 'abcdefghijklmnopqrstuvwxyz',
+  digit: '0123456789',
+  symbol: '!@#$%^&*()-_=+[]{};:,.<>?',
+}
+const SIMILAR = 'ilILoOo01|\'`"'
+
+export function generatePasswordAdvanced(opts: GenOptions = {}): string {
+  const length = opts.length ?? 16
+  const useUpper = opts.upper ?? true
+  const useLower = opts.lower ?? true
+  const useDigit = opts.digit ?? true
+  const useSymbol = opts.symbol ?? true
+  const excludeSimilar = opts.excludeSimilar ?? false
+
+  const pick = (set: string) =>
+    excludeSimilar ? set.split('').filter((c) => !SIMILAR.includes(c)).join('') : set
+
+  const order: Array<[keyof typeof GEN_SETS, boolean]> = [
+    ['upper', useUpper],
+    ['lower', useLower],
+    ['digit', useDigit],
+    ['symbol', useSymbol],
+  ]
+  let pool = ''
+  const activeSets: string[] = []
+  order.forEach(([key, on]) => {
+    if (on) {
+      const s = pick(GEN_SETS[key])
+      if (s) {
+        pool += s
+        activeSets.push(s)
+      }
+    }
+  })
+  if (!pool) pool = GEN_SETS.lower
+  if (!activeSets.length) activeSets.push(GEN_SETS.lower)
+
+  // 多取几个字节，保证 ensure 循环不会越界
+  const bytes = randomBytes(length + activeSets.length + 2)
+  let out = ''
+  for (let i = 0; i < length; i++) out += pool[bytes[i] % pool.length]
+
+  // 确保每种被选中的字符集至少出现一次（避免某些网站校验不通过）
+  activeSets.slice(0, length).forEach((set, idx) => {
+    out = out.slice(0, idx) + set[bytes[idx + length] % set.length] + out.slice(idx + 1)
+  })
+  return out
+}
+
 /** 从主密码派生出 AES-GCM 密钥（PBKDF2）。盐要随密文一起保存，用于再次派生。 */
 export async function deriveKey(masterPassword: string, salt: Uint8Array): Promise<CryptoKey> {
   const enc = new TextEncoder()

@@ -8,6 +8,7 @@
       <van-tabbar route placeholder :active-color="ui.accent" inactive-color="#7d7e80">
         <van-tabbar-item to="/" icon="home-o">首页</van-tabbar-item>
         <van-tabbar-item to="/vault" icon="apps-o">全部</van-tabbar-item>
+        <van-tabbar-item to="/generator" icon="exchange">生成器</van-tabbar-item>
       </van-tabbar>
     </div>
   </van-config-provider>

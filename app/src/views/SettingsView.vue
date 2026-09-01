@@ -112,6 +112,13 @@
       <van-cell title="密码条目" :value="String(vault.totalEntries)" />
       <van-cell title="收藏条目" :value="String(vault.favoriteEntries.length)" />
       <van-cell title="分组/标签" :value="String(vault.data.groups.length)" />
+      <van-cell title="回收站" :value="vault.trashEntries.length ? `${vault.trashEntries.length} 条` : '空'" is-link @click="router.push('/trash')" />
+      <van-cell
+        title="安全统计"
+        :value="`弱 ${vault.securityStats.weak} · 重复 ${vault.securityStats.reused} · 失效 ${vault.securityStats.expired}`"
+        is-link
+        @click="router.push('/vault')"
+      />
       <p class="hint">所有数据加密后存在本机，配置云同步后同时加密备份到云端。</p>
     </div>
 
@@ -146,6 +153,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
 import { useVaultStore } from '@/stores/vault'
 import { useUiStore, ACCENT_PRESETS } from '@/stores/ui'
@@ -153,6 +161,7 @@ import { testConnection, type ConnectionTestResult } from '@/utils/webdav'
 import { entriesToCSV, downloadCSV } from '@/utils/csv'
 
 const vault = useVaultStore()
+const router = useRouter()
 const ui = useUiStore()
 const accentPresets = ACCENT_PRESETS
 const darkOn = ref(ui.isDark)
@@ -290,10 +299,10 @@ function onExportCSV() {
     showToast('请先解锁密码本')
     return
   }
-  const csv = entriesToCSV(vault.data.entries)
+  const csv = entriesToCSV(vault.activeEntries)
   const name = `password-vault-${new Date().toISOString().slice(0, 10)}.csv`
   downloadCSV(name, csv)
-  showToast(`已导出 ${vault.data.entries.length} 条到 CSV`)
+  showToast(`已导出 ${vault.activeEntries.length} 条到 CSV`)
 }
 
 async function onResetVault() {

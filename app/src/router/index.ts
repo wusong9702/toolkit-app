@@ -36,6 +36,18 @@ const router = createRouter({
       meta: { title: '设置' },
     },
     {
+      path: '/generator',
+      name: 'Generator',
+      component: () => import('@/views/GeneratorView.vue'),
+      meta: { title: '密码生成器' },
+    },
+    {
+      path: '/trash',
+      name: 'Trash',
+      component: () => import('@/views/TrashView.vue'),
+      meta: { title: '回收站' },
+    },
+    {
       path: '/:pathMatch(.*)*',
       redirect: '/',
     },

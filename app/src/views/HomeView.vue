@@ -170,17 +170,63 @@
               class="group-cell"
               @click="goGroup(g.name)"
             >
-              <van-icon name="folder-o" class="group-icon" />
+              <van-icon :name="groupIcon(g.name)" class="group-icon" />
               <div class="group-name">{{ g.name }}</div>
               <div class="group-count">{{ g.count }} 条</div>
             </div>
           </div>
         </div>
 
+        <!-- 安全中心 -->
+        <div class="card">
+          <div class="section-label">安全中心</div>
+          <div v-if="vault.securityStats.total === 0" class="sec-empty">还没有密码，先去新增几条吧～</div>
+          <div v-else class="sec-grid">
+            <div
+              class="sec-cell"
+              :class="{ bad: vault.securityStats.weak > 0 }"
+              @click="goFilter('weak')"
+            >
+              <van-icon name="warning-o" class="sec-icon" />
+              <div class="sec-num">{{ vault.securityStats.weak }}</div>
+              <div class="sec-label">弱密码</div>
+            </div>
+            <div
+              class="sec-cell"
+              :class="{ bad: vault.securityStats.reused > 0 }"
+              @click="goFilter('reused')"
+            >
+              <van-icon name="replay" class="sec-icon" />
+              <div class="sec-num">{{ vault.securityStats.reused }}</div>
+              <div class="sec-label">重复密码</div>
+            </div>
+            <div
+              class="sec-cell"
+              :class="{ bad: vault.securityStats.expired > 0 }"
+              @click="goFilter('expired')"
+            >
+              <van-icon name="clock-o" class="sec-icon" />
+              <div class="sec-num">{{ vault.securityStats.expired }}</div>
+              <div class="sec-label">已失效</div>
+            </div>
+          </div>
+          <p class="hint sec-hint">点击数字可筛选对应风险条目，逐个修改。</p>
+        </div>
+
         <!-- 全部密码入口 -->
         <div class="all-entry" @click="goAll">
           <van-icon name="apps-o" />
           <span>全部密码（{{ vault.totalEntries }}）</span>
+          <van-icon name="arrow" class="arrow-icon" />
+        </div>
+
+        <!-- 回收站入口 -->
+        <div class="all-entry trash-entry" @click="goTrash">
+          <van-icon name="delete-o" />
+          <span>回收站</span>
+          <van-tag v-if="vault.trashEntries.length" type="danger" plain class="trash-badge">
+            {{ vault.trashEntries.length }}
+          </van-tag>
           <van-icon name="arrow" class="arrow-icon" />
         </div>
       </template>
@@ -200,6 +246,7 @@ import { showToast } from 'vant'
 import { useVaultStore, type VaultEntry } from '@/stores/vault'
 import { copySecret } from '@/utils/clipboard'
 import { matchEntry } from '@/utils/search'
+import { groupIcon } from '@/utils/categories'
 
 const vault = useVaultStore()
 const router = useRouter()
@@ -231,7 +278,7 @@ const searching = computed(() => keyword.value.trim().length > 0)
 const searchResults = computed(() => {
   const kw = keyword.value.trim()
   if (!kw) return []
-  return vault.data.entries.filter((e) => matchEntry(e, kw))
+  return vault.activeEntries.filter((e) => matchEntry(e, kw))
 })
 
 /* ---------- 主页区块数据 ---------- */
@@ -291,6 +338,14 @@ function goGroup(name: string) {
 
 function goAll() {
   router.push('/vault')
+}
+
+function goFilter(type: 'weak' | 'reused' | 'expired') {
+  router.push({ path: '/vault', query: { filter: type } })
+}
+
+function goTrash() {
+  router.push('/trash')
 }
 
 /* ---------- 主密码 ---------- */
@@ -518,6 +573,66 @@ const syncClass = computed(() => {
 .all-entry .arrow-icon {
   margin-left: auto;
   color: #c8c9cc;
+}
+/* 回收站入口 */
+.trash-entry {
+  margin-bottom: 24px;
+}
+.trash-badge {
+  margin-left: 2px;
+}
+/* 安全中心 */
+.sec-empty {
+  padding: 12px 0;
+  text-align: center;
+  color: #c8c9cc;
+  font-size: 13px;
+}
+.sec-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.sec-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 6px;
+  background: #f7f8fa;
+  border-radius: 10px;
+  cursor: pointer;
+}
+html.dark .sec-cell {
+  background: #242424;
+}
+.sec-cell.bad {
+  background: #fff1f0;
+}
+html.dark .sec-cell.bad {
+  background: #2a1718;
+}
+.sec-icon {
+  font-size: 22px;
+  color: #07c160;
+}
+.sec-cell.bad .sec-icon {
+  color: #ee0a24;
+}
+.sec-num {
+  font-size: 22px;
+  font-weight: 700;
+  color: #323233;
+}
+html.dark .sec-num {
+  color: #e6e6e6;
+}
+.sec-label {
+  font-size: 12px;
+  color: #969799;
+}
+.sec-hint {
+  margin: 10px 0 0;
 }
 /* 搜索结果条目 */
 .entry-list {
