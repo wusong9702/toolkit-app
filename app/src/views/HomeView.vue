@@ -183,7 +183,7 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import { useVaultStore, type VaultEntry } from '@/stores/vault'
-import { copyToClipboard } from '@/utils/clipboard'
+import { copySecret } from '@/utils/clipboard'
 
 const vault = useVaultStore()
 const router = useRouter()
@@ -244,8 +244,8 @@ async function onCopy(e: VaultEntry, field: 'name' | 'password') {
     showToast('内容为空')
     return
   }
-  const ok = await copyToClipboard(text)
-  showToast(ok ? `已复制${field === 'name' ? '名称' : '密码'}` : '复制失败，请长按手动复制')
+  const ok = await copySecret(text)
+  showToast(ok ? `已复制${field === 'name' ? '名称' : '密码'}，30 秒后自动清除` : '复制失败，请长按手动复制')
 }
 
 function onToggleFav(e: VaultEntry) {

@@ -48,3 +48,41 @@ export async function copyToClipboard(text: string): Promise<boolean> {
     return false
   }
 }
+
+/* ---------- 敏感内容自动清除（密码管理器标配） ---------- */
+
+let clearTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * 复制敏感内容（密码等），默认 30 秒后自动清空剪贴板。
+ *
+ * 为什么需要：密码复制到剪贴板后会一直残留，其他 App 在后台可以读到。
+ * 自动清空把泄露窗口缩到 30 秒内。
+ *
+ * 清空前尽量确认剪贴板内容没变（防止把用户期间新复制的内容误清掉）：
+ * - 能读到剪贴板 → 内容还是我们写的那段才清空
+ * - 读不到（权限/环境限制）→ 直接清空（自用场景可接受）
+ */
+export async function copySecret(text: string, clearAfterMs = 30_000): Promise<boolean> {
+  const ok = await copyToClipboard(text)
+  if (!ok) return false
+
+  if (clearTimer) clearTimeout(clearTimer)
+  clearTimer = setTimeout(async () => {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        try {
+          const current = await navigator.clipboard.readText()
+          if (current !== text) return // 用户已复制别的内容，别动它
+        } catch {
+          /* 读不了，仍清空 */
+        }
+        await navigator.clipboard.writeText('')
+      }
+    } catch {
+      /* 清空失败静默处理，不打扰用户 */
+    }
+  }, clearAfterMs)
+
+  return true
+}

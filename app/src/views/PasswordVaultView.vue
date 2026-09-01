@@ -104,7 +104,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
 import { useVaultStore, type VaultEntry } from '@/stores/vault'
-import { copyToClipboard } from '@/utils/clipboard'
+import { copySecret } from '@/utils/clipboard'
 
 const vault = useVaultStore()
 const route = useRoute()
@@ -159,8 +159,8 @@ function maskedPassword(pwd: string): string {
 }
 
 async function copyText(text: string, what: string) {
-  const ok = await copyToClipboard(text)
-  showToast(ok ? `已复制${what}` : `复制失败：${what}请长按手动复制`)
+  const ok = await copySecret(text)
+  showToast(ok ? `已复制${what}，30 秒后自动清除` : `复制失败：${what}请长按手动复制`)
 }
 
 function onCopy(e: VaultEntry, field: 'name' | 'password') {

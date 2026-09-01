@@ -21,7 +21,8 @@ export function randomBytes(len: number): Uint8Array {
 /** 随机生成密码（默认 16 位，含大小写/数字/符号，去除易混淆字符） */
 export function generatePassword(length = 16): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*_-+='
-  const bytes = randomBytes(length)
+  // 多取 3 字节供下面的 ensure 循环用，避免 Uint8Array 越界读到 undefined
+  const bytes = randomBytes(length + 3)
   let out = ''
   for (let i = 0; i < length; i++) out += chars[bytes[i] % chars.length]
   // 保证至少含一个大写、小写、数字，避免某些网站校验不通过

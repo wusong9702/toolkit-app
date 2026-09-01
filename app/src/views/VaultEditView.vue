@@ -135,7 +135,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import { useVaultStore, type VaultEntry } from '@/stores/vault'
 import { generatePassword } from '@/utils/crypto'
-import { copyToClipboard } from '@/utils/clipboard'
+import { copySecret } from '@/utils/clipboard'
 
 const vault = useVaultStore()
 const route = useRoute()
@@ -198,8 +198,8 @@ async function onCopy(text: string) {
     showToast('内容为空')
     return
   }
-  const ok = await copyToClipboard(text)
-  showToast(ok ? '已复制' : '复制失败，请长按手动复制')
+  const ok = await copySecret(text)
+  showToast(ok ? '已复制，30 秒后自动清除' : '复制失败，请长按手动复制')
 }
 
 function onGenPwd() {
