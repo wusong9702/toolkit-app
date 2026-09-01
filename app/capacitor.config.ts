@@ -7,8 +7,9 @@ import type { CapacitorConfig } from '@capacitor/cli'
  * 对不上就白屏，这是新手最常踩的坑。
  */
 const config: CapacitorConfig = {
-  appId: 'com.wusong.mimaxing',
-  appName: '密码星',
+  // 注意：appId（包名）是应用的身份证号，上架后永久无法修改，改前务必想清楚。
+  appId: 'com.mimaxing.toolkit',
+  appName: '密码本',
   webDir: 'dist',
 
   plugins: {
