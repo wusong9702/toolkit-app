@@ -17,8 +17,8 @@ name: 构建 iOS 安装包
 #       （默认：development → "Apple Development"，其余 → "Apple Distribution"）
 
 on:
-  push:
-    tags: ['v*']
+  # 暂不随标签自动触发（iOS 签名打包暂停中，避免误触发白跑十几分钟）。
+  # 以后要打包 iOS 时，在 Actions 里手动 Run workflow 即可。
   workflow_dispatch:
     inputs:
       export_method:
