@@ -6,7 +6,15 @@ name: 构建 iOS 安装包
 # 免费额度：公开仓库不限时；私有仓库每月 2000 分钟（macOS 按 10 倍计费，
 # 也就是实际约 200 分钟），一个包大约 10-15 分钟，够用。
 #
-# 首次使用需要在仓库 Settings → Secrets 里配置下面 5 个值，详见文档 03。
+# 首次使用需要在仓库 Settings → Secrets 里配置下面 5 个值，详见文档 03：
+#   IOS_CERTIFICATE_BASE64            p12 转 base64
+#   IOS_CERTIFICATE_PASSWORD          p12 导出密码
+#   IOS_PROVISIONING_PROFILE_BASE64   mobileprovision 转 base64
+#   IOS_TEAM_ID                       Team ID（可不填，工作流会从描述文件里读）
+#   KEYCHAIN_PASSWORD                 随便一个字符串，临时钥匙串的密码
+#
+# 可选：IOS_CODE_SIGN_IDENTITY   想手动指定签名身份时填
+#       （默认：development → "Apple Development"，其余 → "Apple Distribution"）
 
 on:
   push:
@@ -50,54 +58,133 @@ jobs:
           P12_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          set -euo pipefail
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+          # 造一个临时钥匙串，只放签名证书，构建完就删
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          # 保留 login.keychain，否则可能连带影响其他钥匙串查询
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain
 
-          echo "$P12_BASE64" | base64 --decode > $RUNNER_TEMP/certificate.p12
-          security import $RUNNER_TEMP/certificate.p12 \
+          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" \
             -P "$P12_PASSWORD" -A -t cert -f pkcs12 \
             -k "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
 
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          echo "${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}" | base64 --decode \
-            > ~/Library/MobileDevice/Provisioning\ Profiles/build.mobileprovision
+          # 关键一步：不设分区列表，codesign 会在 CI 上报 errSecInternalComponent
+          # （本地 Xcode 点几下就没事，自动化构建里必挂，很坑）
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-      - name: 归档并导出
+          echo "--- 钥匙串里可用的签名身份 ---"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+      - name: 安装描述文件并读出签名信息
+        env:
+          PP_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
         run: |
-          cd ios/App
-          METHOD="${{ github.event.inputs.export_method || 'app-store' }}"
+          set -euo pipefail
 
-          if [ "$METHOD" = "app-store" ]; then
-            xcodebuild -workspace App.xcworkspace -scheme App \
-              -configuration Release -archivePath $RUNNER_TEMP/App.xcarchive \
-              -destination 'generic/platform=iOS' \
-              archive
-          else
-            xcodebuild -workspace App.xcworkspace -scheme App \
-              -configuration Release -archivePath $RUNNER_TEMP/App.xcarchive \
-              -destination 'generic/platform=iOS' \
-              -allowProvisioningUpdates archive
+          PP_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          PP_PATH="$PP_DIR/build.mobileprovision"
+          mkdir -p "$PP_DIR"
+          echo "$PP_BASE64" | base64 --decode > "$PP_PATH"
+
+          # 把 mobileprovision 解成 plist，UUID / Team ID / Bundle ID 直接读出来。
+          # 好处：不用再手填 Secret，也就不会填错。
+          PLIST_PATH="$RUNNER_TEMP/profile.plist"
+          security cms -D -i "$PP_PATH" > "$PLIST_PATH"
+
+          PP_UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$PLIST_PATH")
+          PP_TEAM=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$PLIST_PATH")
+          APP_ID=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$PLIST_PATH")
+          BUNDLE_ID="${APP_ID#*.}"   # 去掉 "TEAMID." 前缀
+          PP_NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$PLIST_PATH")
+
+          echo "描述文件：$PP_NAME（$PP_UUID）"
+          echo "Team：$PP_TEAM"
+          echo "Bundle ID：$BUNDLE_ID"
+
+          if [ "$BUNDLE_ID" != "com.mimaxing.toolkit" ]; then
+            echo "⚠️ 警告：描述文件的 Bundle ID 是 $BUNDLE_ID，和 capacitor.config.ts 里的 com.mimaxing.toolkit 不一致"
           fi
 
-          cat > $RUNNER_TEMP/ExportOptions.plist <<EOF
+          {
+            echo "PP_UUID=$PP_UUID"
+            echo "PP_TEAM=$PP_TEAM"
+            echo "BUNDLE_ID=$BUNDLE_ID"
+          } >> "$GITHUB_ENV"
+
+      - name: 归档并导出
+        env:
+          TEAM_ID_FALLBACK: ${{ secrets.IOS_TEAM_ID }}
+          IDENTITY_OVERRIDE: ${{ secrets.IOS_CODE_SIGN_IDENTITY }}
+        run: |
+          set -euo pipefail
+          cd ios/App
+
+          METHOD="${{ github.event.inputs.export_method || 'app-store' }}"
+
+          # 走「手动签名」：证书和描述文件已经装好了，Xcode 不需要联网向 Apple 申请任何东西。
+          # 所以这里不需要 -allowProvisioningUpdates —— 加了反而会让 xcodebuild 尝试联网
+          # 更新描述文件，在没有登录开发者账号的 CI 上直接失败。
+          # （旧版本把它放在非 app-store 分支上，正好放反了，已改掉。）
+          if [ -n "${IDENTITY_OVERRIDE:-}" ]; then
+            SIGN_IDENTITY="$IDENTITY_OVERRIDE"
+          elif [ "$METHOD" = "development" ]; then
+            SIGN_IDENTITY="Apple Development"
+          else
+            SIGN_IDENTITY="Apple Distribution"
+          fi
+
+          TEAM_ID="${PP_TEAM:-$TEAM_ID_FALLBACK}"
+          echo "签名方式：manual ｜ 身份：$SIGN_IDENTITY ｜ Team：$TEAM_ID ｜ 分发：$METHOD"
+
+          xcodebuild -workspace App.xcworkspace -scheme App \
+            -configuration Release \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            PROVISIONING_PROFILE_SPECIFIER="$PP_UUID" \
+            archive
+
+          # 手动签名导出时必须带 provisioningProfiles，否则 exportArchive 会报
+          # "No provisioning profile matches the bundle identifier"
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
             <key>method</key><string>$METHOD</string>
             <key>signingStyle</key><string>manual</string>
-            <key>teamID</key><string>${{ secrets.IOS_TEAM_ID }}</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>$BUNDLE_ID</key><string>$PP_UUID</string>
+            </dict>
           </dict>
           </plist>
           EOF
 
           xcodebuild -exportArchive \
-            -archivePath $RUNNER_TEMP/App.xcarchive \
-            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
-            -exportPath $RUNNER_TEMP/export
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export"
+
+      - name: 清理临时钥匙串
+        if: always()
+        run: |
+          if [ -n "${KEYCHAIN_PATH:-}" ]; then
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          fi
 
       - name: 上传 IPA
         uses: actions/upload-artifact@v4

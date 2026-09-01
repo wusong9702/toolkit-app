@@ -1,0 +1,50 @@
+// Android 签名接线文件
+//
+// 为什么需要它：
+//   Capacitor 生成的 android/app/build.gradle 不认识 keystore.properties。
+//   以前只是把签名信息写成一个文件，没人去读它，结果 release 包是「未签名」的——
+//   能打出来，但装不上真机、更上不了架。这个文件就是那根线。
+//
+// 怎么用：
+//   .github/workflows/build-android.yml 会把它复制到 android/app/signing.gradle，
+//   并在 android/app/build.gradle 末尾追加一行 apply from: 'signing.gradle'。
+//
+// 安全性：
+//   这里不含任何密码。真正的密码存在 android/keystore.properties（CI 里由 Secrets 生成，
+//   不进仓库）。没有 keystore.properties 时本文件什么都不做，debug 构建不受影响。
+//
+// 路径约定：
+//   rootProject.file(...)      → android/
+//   file(...)                  → android/app/
+
+def propsFile = rootProject.file('keystore.properties')
+def props = new Properties()
+
+if (propsFile.exists()) {
+    props.load(new FileInputStream(propsFile))
+    println "[signing] 已加载 ${propsFile}，release 包将被签名"
+} else {
+    println "[signing] 未找到 ${propsFile}，release 包将是未签名包（不能上架）"
+}
+
+android {
+    if (propsFile.exists()) {
+        signingConfigs {
+            release {
+                // storeFile 的值（如 keystore.jks）相对 app 模块目录解析
+                storeFile file(props['storeFile'])
+                storePassword props['storePassword']
+                keyAlias props['keyAlias']
+                keyPassword props['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            if (propsFile.exists()) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+}

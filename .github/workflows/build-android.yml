@@ -3,6 +3,14 @@ name: 构建 Android 安装包
 # 产出两种文件：
 #   APK —— 可以直接发给别人安装，适合测试
 #   AAB —— Google Play 上架必须用的格式
+#
+# 想出正式包，需要在仓库 Settings → Secrets 里配 4 个值：
+#   ANDROID_KEYSTORE_BASE64    keystore 文件转 base64（base64 -w 0 my-release-key.jks）
+#   ANDROID_KEYSTORE_PASSWORD  密钥库密码
+#   ANDROID_KEY_ALIAS          别名，如 my-key-alias
+#   ANDROID_KEY_PASSWORD       密钥密码
+# 不配也能跑，只是出的是未签名的 release 包，只能本地看看，不能上架。
+
 on:
   push:
     tags: ['v*'] # 打 v1.0.0 这样的标签时触发
@@ -44,27 +52,48 @@ jobs:
           [ -d android ] || npx cap add android
           npx cap sync android
 
-      # ------ 签名配置（可选）------
-      # 没有签名就走 debug 包，能装不能用上架。
-      # 想出正式包：把 keystore 文件用 base64 编码后填到仓库 Secrets 里
+      # ------ 签名接线（关键步骤，别删）------
+      # Capacitor 生成的 build.gradle 不会去读 keystore.properties，
+      # 必须由我们把仓库里的 signing.gradle 塞进 android/app/ 并在 build.gradle 末尾 apply。
+      - name: 接入签名配置
+        run: |
+          set -e
+          cp ../scripts/android-signing.gradle android/app/signing.gradle
+          if ! grep -q "signing.gradle" android/app/build.gradle; then
+            printf "\napply from: 'signing.gradle'\n" >> android/app/build.gradle
+          fi
+          echo "--- build.gradle 末尾 3 行 ---"
+          tail -3 android/app/build.gradle
+
       - name: 准备签名文件
         if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
         run: |
+          set -e
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/keystore.jks
           cat > android/keystore.properties <<EOF
+          storeFile=keystore.jks
           storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
           keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
-          storeFile=keystore.jks
           EOF
+          # 只确认文件存在，绝不打印内容（里面有密码）
+          echo "keystore.properties 已写入，字节数：$(wc -c < android/keystore.properties)"
+
+      - name: 检查签名是否生效
+        run: |
+          if [ -f android/keystore.properties ]; then
+            echo "✅ 已检测到签名配置，release 包会被签名"
+          else
+            echo "⚠️ 没有签名配置（Secrets 未填），release 包将是未签名包，不能上架"
+          fi
 
       - name: 构建 Debug APK
         if: ${{ github.event.inputs.build_type != 'release' && !startsWith(github.ref, 'refs/tags/v') }}
-        run: cd android && ./gradlew assembleDebug --no-daemon
+        run: cd android && chmod +x ./gradlew && ./gradlew assembleDebug --no-daemon
 
       - name: 构建 Release AAB + APK
         if: ${{ github.event.inputs.build_type == 'release' || startsWith(github.ref, 'refs/tags/v') }}
-        run: cd android && ./gradlew bundleRelease assembleRelease --no-daemon
+        run: cd android && chmod +x ./gradlew && ./gradlew bundleRelease assembleRelease --no-daemon
 
       - name: 上传安装包
         uses: actions/upload-artifact@v4
