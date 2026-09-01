@@ -45,17 +45,19 @@
         </van-tabs>
       </div>
 
-      <!-- 条目列表 -->
+      <!-- 条目列表（拖拽把手可排序） -->
       <van-empty v-if="!visibleEntries.length" description="暂无条目，点「新增」开始" />
-      <div v-else class="entry-list">
+      <div v-else ref="entryListEl" class="entry-list">
         <div
           v-for="entry in visibleEntries"
           :key="entry.id"
           class="entry-card"
+          :data-id="entry.id"
           :class="{ expired: isExpired(entry) }"
         >
           <div class="entry-main" @click="onCopy(entry, 'name')">
             <div class="entry-name">
+              <van-icon name="bars" class="drag-handle" @click.stop />
               <van-icon
                 :name="entry.favorite ? 'star' : 'star-o'"
                 :class="{ stared: entry.favorite }"
@@ -100,9 +102,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
+import Sortable from 'sortablejs'
 import { useVaultStore, type VaultEntry } from '@/stores/vault'
 import { copySecret } from '@/utils/clipboard'
 
@@ -129,6 +132,7 @@ onMounted(() => {
     const idx = groupNames.value.indexOf(g)
     if (idx >= 0) activeGroup.value = idx
   }
+  initSortable()
 })
 
 const visibleEntries = computed(() => {
@@ -138,6 +142,74 @@ const visibleEntries = computed(() => {
     (e) => e.group === g || (e.tags && e.tags.includes(g)),
   )
 })
+
+/* ---------- 触屏拖拽排序（SortableJS） ---------- */
+const entryListEl = ref<HTMLElement | null>(null)
+let sortable: Sortable | null = null
+
+function initSortable(): void {
+  const el = entryListEl.value
+  if (!el || sortable) return
+  sortable = Sortable.create(el, {
+    handle: '.drag-handle', // 只有按住把手才拖，避免误触复制/编辑
+    animation: 150,
+    delay: 100, // 触屏上长按 100ms 才开始拖，与页面滚动不冲突
+    delayOnTouchOnly: true,
+    ghostClass: 'drag-ghost',
+    onEnd: onSortEnd,
+  })
+}
+
+function destroySortable(): void {
+  if (sortable) {
+    sortable.destroy()
+    sortable = null
+  }
+}
+
+function onSortEnd(evt: Sortable.SortableEvent): void {
+  const { oldIndex, newIndex } = evt
+  if (oldIndex == null || newIndex == null || oldIndex === newIndex) return
+  const id = (evt.item as HTMLElement).dataset.id
+  if (!id) return
+
+  // 模拟拖动后的新视图顺序，取出条目拖动后的前/后邻居
+  const view = visibleEntries.value
+  const newView = view.slice()
+  const [moved] = newView.splice(oldIndex, 1)
+  newView.splice(newIndex, 0, moved)
+  const before = newView[newIndex - 1]
+  const after = newView[newIndex + 1]
+
+  // 在真实数组里把条目挪到正确位置（其他分组的条目相对顺序不变）
+  const list = vault.data.entries
+  const fromReal = list.findIndex((e) => e.id === id)
+  if (fromReal < 0) return
+  const [m] = list.splice(fromReal, 1)
+
+  let insertAt: number
+  if (after) {
+    insertAt = list.findIndex((e) => e.id === after.id)
+    if (insertAt < 0) insertAt = list.length
+  } else if (before) {
+    insertAt = list.findIndex((e) => e.id === before.id) + 1
+    if (insertAt <= 0) insertAt = list.length
+  } else {
+    insertAt = 0
+  }
+  list.splice(insertAt, 0, m)
+  list.forEach((e, i) => (e.sort = list.length - i))
+  vault.save()
+  showToast('已调整顺序')
+}
+
+// 分组切换 / 锁定状态变化 / 数据变化导致列表重建时，重建 Sortable 实例
+watch([visibleEntries, () => vault.isLocked], () => {
+  destroySortable()
+  void nextTick(initSortable)
+})
+
+onBeforeUnmount(destroySortable)
 
 function isExpired(e: VaultEntry): boolean {
   return e.expiresAt > 0 && Date.now() > e.expiresAt
@@ -295,6 +367,16 @@ const syncClass = computed(() => {
 }
 .star-icon.stared {
   color: #ed6a0c;
+}
+/* 拖拽排序把手 */
+.drag-handle {
+  font-size: 18px;
+  color: #c8c9cc;
+  cursor: grab;
+  touch-action: none;
+}
+.drag-ghost {
+  opacity: 0.4;
 }
 .entry-meta {
   margin-top: 6px;
