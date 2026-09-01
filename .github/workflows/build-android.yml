@@ -54,7 +54,9 @@ jobs:
       - name: 生成 Capacitor 平台目录
         # ios/ android/ 不提交到仓库时，这里自动生成
         run: |
-          npm ci
+          # 坑：lock 文件里的下载地址是国内的 npmmirror 镜像，GitHub 构建机在美国，
+          # 直接 npm ci 会去国内镜像拉包，容易超时。用官方源并强制替换 lock 里的 host。
+          npm ci --registry=https://registry.npmjs.org --replace-registry-host=always
           npm run build
           [ -d android ] || npx cap add android
           npx cap sync android
