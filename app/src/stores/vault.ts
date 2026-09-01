@@ -12,6 +12,14 @@ import {
   type WebDavConfig,
 } from '@/utils/webdav'
 
+/** 自定义字段（账号本子风格：可附加任意键值，如 手机号 / 安全问题 / 备用邮箱） */
+export interface CustomField {
+  label: string
+  value: string
+  /** 是否隐藏显示（如 PIN、密保答案），默认 false */
+  secret?: boolean
+}
+
 /** 一条密码记录 */
 export interface VaultEntry {
   id: string
@@ -34,6 +42,10 @@ export interface VaultEntry {
   createdAt: number
   /** 更新时间（ms） */
   updatedAt: number
+  /** 自定义字段（账号本子风格：可附加任意键值） */
+  fields: CustomField[]
+  /** TOTP 密钥（base32，RFC 6238）。空字符串 = 无动态码 */
+  totp: string
 }
 
 /** 密码库整体（数组 + 分组元信息） */
@@ -92,6 +104,16 @@ function normalize(data: VaultData): VaultData {
       favorite: e.favorite === true,
       tags: Array.isArray(e.tags) ? e.tags : [],
       sort: typeof e.sort === 'number' ? e.sort : 0,
+      fields: Array.isArray(e.fields)
+        ? e.fields
+            .filter((f) => f && typeof f.label === 'string')
+            .map((f) => ({
+              label: f.label,
+              value: typeof f.value === 'string' ? f.value : String(f.value ?? ''),
+              secret: f.secret === true,
+            }))
+        : [],
+      totp: typeof e.totp === 'string' ? e.totp : '',
     })),
   }
 }
@@ -119,6 +141,46 @@ export const useVaultStore = defineStore('vault', () => {
   /** 失效倒计时：当前是否已锁定（所有失效条目不可见密码） */
   const isLocked = computed(() => !unlocked.value)
 
+  /* ---------- 输错主密码锁定 ---------- */
+  const MAX_FAIL = 5
+  const LOCK_COOLDOWN_MS = 60_000 // 输错 5 次后锁定 1 分钟
+  const failCount = ref(getItem<number>('vaultFailCount', 0))
+  const lockUntil = ref(getItem<number>('vaultLockUntil', 0))
+  const nowTs = ref(Date.now())
+  let lockTicker: ReturnType<typeof setInterval> | null = null
+  function startLockTicker() {
+    if (lockTicker) return
+    lockTicker = setInterval(() => {
+      nowTs.value = Date.now()
+      if (lockUntil.value <= nowTs.value) stopLockTicker()
+    }, 1000)
+  }
+  function stopLockTicker() {
+    if (lockTicker) {
+      clearInterval(lockTicker)
+      lockTicker = null
+    }
+  }
+  /** 是否处于「输错过多」临时锁定中 */
+  const isTempLocked = computed(() => lockUntil.value > nowTs.value)
+  /** 剩余锁定秒数（用于倒计时显示） */
+  const lockRemainingSec = computed(() =>
+    Math.max(0, Math.ceil((lockUntil.value - nowTs.value) / 1000)),
+  )
+
+  /* ---------- 后台自动锁定 ---------- */
+  /** 后台超过 N 秒后自动锁定；0 = 关闭 */
+  const autoLockSeconds = ref(getItem<number>('autoLockSeconds', 30))
+  function setAutoLockSeconds(s: number): void {
+    autoLockSeconds.value = s
+    setItem('autoLockSeconds', s)
+  }
+
+  /* ---------- 指纹 / 面容解锁 ---------- */
+  const biometricEnabled = ref(getItem<boolean>('biometricEnabled', false))
+  /** 是否已在系统安全存储里保存了主密码（解锁后可用生物识别） */
+  const hasBiometricSecret = ref(getItem<boolean>('hasBiometricSecret', false))
+
   /** 有失效时间的条目（用于界面标记） */
   const expiringEntries = computed(
     () =>
@@ -138,8 +200,30 @@ export const useVaultStore = defineStore('vault', () => {
     await save()
   }
 
+  /** 解锁成功后的统一收尾：清错误计数 + 刷新生物识别主密码 */
+  function afterUnlockSuccess(): void {
+    failCount.value = 0
+    lockUntil.value = 0
+    stopLockTicker()
+    setItem('vaultFailCount', 0)
+    setItem('vaultLockUntil', 0)
+    if (biometricEnabled.value && masterPassword.value) void storeMasterSecret(masterPassword.value)
+  }
+
+  /** 解锁失败：累计次数，达到上限则临时锁定 */
+  function onUnlockFailed(): void {
+    failCount.value++
+    setItem('vaultFailCount', failCount.value)
+    if (failCount.value >= MAX_FAIL) {
+      lockUntil.value = Date.now() + LOCK_COOLDOWN_MS
+      setItem('vaultLockUntil', lockUntil.value)
+      startLockTicker()
+    }
+  }
+
   /** 解锁：用主密码解密本地库；密码错会抛异常 */
   async function unlock(master: string): Promise<boolean> {
+    if (lockUntil.value > Date.now()) return false // 仍在临时锁定冷却中
     try {
       const encrypted = getItem<{ v: number; salt: string; iv: string; cipher: string } | null>(
         VAULT_KEY,
@@ -149,23 +233,31 @@ export const useVaultStore = defineStore('vault', () => {
         masterPassword.value = master
         data.value = emptyVault()
         unlocked.value = true
+        afterUnlockSuccess()
         return true
       }
       const plain = await decryptObject<VaultData>(encrypted, master)
       masterPassword.value = master
       data.value = plain
       unlocked.value = true
+      afterUnlockSuccess()
       return true
     } catch {
+      onUnlockFailed()
       return false // 主密码错误
     }
   }
 
-  /** 锁定（清除内存明文 + 密码） */
+  /** 锁定（清除内存明文 + 密码）；手动锁定不施加输错冷却 */
   function lock(): void {
     unlocked.value = false
     masterPassword.value = ''
     data.value = emptyVault()
+    failCount.value = 0
+    lockUntil.value = 0
+    setItem('vaultFailCount', 0)
+    setItem('vaultLockUntil', 0)
+    stopLockTicker()
   }
 
   /* ---------- 条目 CRUD ---------- */
@@ -374,16 +466,95 @@ export const useVaultStore = defineStore('vault', () => {
   /** 清空本库（重新初始化用） */
   function resetAll(): void {
     lock()
+    void clearMasterSecret()
+    biometricEnabled.value = false
+    setItem('biometricEnabled', false)
     setItem(VAULT_KEY, null as unknown as string)
     setItem(MASTER_KEY, false)
     setItem('webdavConfig', { url: '', username: '', password: '', dir: '' })
     isInitialized.value = false
   }
 
+  /* ---------- 指纹 / 面容解锁（生物识别） ---------- */
+
+  /** 设备是否支持并已录入生物识别 */
+  async function isBiometryAvailable(): Promise<boolean> {
+    try {
+      const mod = await import('@aparajita/capacitor-biometric-auth')
+      const res = await mod.BiometricAuth.checkBiometry()
+      return res.isAvailable
+    } catch {
+      return false // Web / 未配置原生 → 不可用
+    }
+  }
+
+  /** 把主密码存进系统安全存储（Keychain / Keystore），供生物识别解锁取回 */
+  async function storeMasterSecret(master: string): Promise<boolean> {
+    try {
+      const { SecureStoragePlugin } = await import('capacitor-secure-storage-plugin')
+      await SecureStoragePlugin.set({ key: 'vaultMaster', value: master })
+      hasBiometricSecret.value = true
+      setItem('hasBiometricSecret', true)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** 删除系统安全存储里的主密码 */
+  async function clearMasterSecret(): Promise<void> {
+    try {
+      const { SecureStoragePlugin } = await import('capacitor-secure-storage-plugin')
+      await SecureStoragePlugin.remove({ key: 'vaultMaster' })
+    } catch {
+      /* 忽略：可能尚未存储或 Web 环境不支持 */
+    }
+    hasBiometricSecret.value = false
+    setItem('hasBiometricSecret', false)
+  }
+
+  /** 开关生物识别：开启时若已解锁则立即存储主密码；关闭时清除 */
+  function setBiometricEnabled(on: boolean): void {
+    biometricEnabled.value = on
+    setItem('biometricEnabled', on)
+    if (!on) void clearMasterSecret()
+    else if (unlocked.value && masterPassword.value) void storeMasterSecret(masterPassword.value)
+  }
+
+  /** 用生物识别解锁：验证通过后取回主密码并解密 */
+  async function unlockWithBiometrics(): Promise<boolean> {
+    if (!biometricEnabled.value || !hasBiometricSecret.value) return false
+    try {
+      const mod = await import('@aparajita/capacitor-biometric-auth')
+      await mod.BiometricAuth.authenticate({
+        reason: '解锁密码本',
+        androidTitle: '解锁密码本',
+        cancelTitle: '取消',
+      })
+      const { SecureStoragePlugin } = await import('capacitor-secure-storage-plugin')
+      const { value } = await SecureStoragePlugin.get({ key: 'vaultMaster' })
+      if (!value) return false
+      // 生物识别是独立强因子，不受「输错主密码」冷却限制
+      lockUntil.value = 0
+      setItem('vaultLockUntil', 0)
+      return await unlock(value)
+    } catch {
+      // 用户取消或验证失败 → 解锁失败（不计入主密码错误次数）
+      return false
+    }
+  }
+
   return {
     isInitialized,
     unlocked,
     isLocked,
+    isTempLocked,
+    lockRemainingSec,
+    failCount,
+    MAX_FAIL,
+    autoLockSeconds,
+    biometricEnabled,
+    hasBiometricSecret,
     data,
     sync,
     webdavConfig,
@@ -392,6 +563,10 @@ export const useVaultStore = defineStore('vault', () => {
     setupMaster,
     unlock,
     lock,
+    setAutoLockSeconds,
+    isBiometryAvailable,
+    setBiometricEnabled,
+    unlockWithBiometrics,
     addEntry,
     updateEntry,
     removeEntry,

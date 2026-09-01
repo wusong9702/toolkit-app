@@ -36,12 +36,27 @@
         type="password"
         label="主密码"
         placeholder="输入主密码"
+        :disabled="vault.isTempLocked"
         autocomplete="current-password"
         @keyup.enter="onUnlock"
       />
+      <p v-if="vault.isTempLocked" class="hint warn">
+        已连续输错 {{ vault.MAX_FAIL }} 次，请 {{ vault.lockRemainingSec }} 秒后再试
+      </p>
       <div class="btn-row">
-        <van-button type="primary" block :loading="busy" @click="onUnlock">解锁</van-button>
+        <van-button type="primary" block :loading="busy" :disabled="vault.isTempLocked" @click="onUnlock">
+          解锁
+        </van-button>
       </div>
+      <van-button
+        v-if="showBiometric"
+        block
+        icon="thumb-circle-o"
+        class="bio-btn"
+        @click="onBiometricUnlock"
+      >
+        使用指纹 / 面容解锁
+      </van-button>
       <p v-if="error" class="error">{{ error }}</p>
     </div>
 
@@ -179,11 +194,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import { useVaultStore, type VaultEntry } from '@/stores/vault'
 import { copySecret } from '@/utils/clipboard'
+import { matchEntry } from '@/utils/search'
 
 const vault = useVaultStore()
 const router = useRouter()
@@ -194,20 +210,23 @@ const busy = ref(false)
 const error = ref('')
 const keyword = ref('')
 
+/* ---------- 生物识别解锁 ---------- */
+const biometryAvailable = ref(false)
+const showBiometric = computed(
+  () => biometryAvailable.value && vault.biometricEnabled && vault.hasBiometricSecret,
+)
+async function onBiometricUnlock() {
+  const ok = await vault.unlockWithBiometrics()
+  if (ok) {
+    showToast('已解锁')
+    master1.value = ''
+  } else {
+    showToast('生物识别解锁失败，请使用主密码')
+  }
+}
+
 /* ---------- 搜索 ---------- */
 const searching = computed(() => keyword.value.trim().length > 0)
-
-/** 搜索匹配：名称 / 密码 / 备注 / 标签 / 分组，不分大小写 */
-function matchEntry(e: VaultEntry, kw: string): boolean {
-  const k = kw.toLowerCase()
-  return (
-    e.name.toLowerCase().includes(k) ||
-    e.password.toLowerCase().includes(k) ||
-    e.note.toLowerCase().includes(k) ||
-    e.group.toLowerCase().includes(k) ||
-    e.tags.some((t) => t.toLowerCase().includes(k))
-  )
-}
 
 const searchResults = computed(() => {
   const kw = keyword.value.trim()
@@ -312,6 +331,11 @@ async function onUnlock() {
     error.value = '主密码错误'
   }
 }
+
+onMounted(async () => {
+  // 检测设备是否支持生物识别（用于显示指纹解锁按钮）
+  biometryAvailable.value = await vault.isBiometryAvailable()
+})
 
 /* ---------- 同步状态 ---------- */
 const syncText = computed(() => {
@@ -588,6 +612,13 @@ const syncClass = computed(() => {
   font-size: 12px;
   line-height: 1.7;
   color: #969799;
+}
+.hint.warn {
+  color: #ed6a0c;
+  font-weight: 600;
+}
+.bio-btn {
+  margin-top: 12px;
 }
 .btn-row {
   margin-top: 12px;

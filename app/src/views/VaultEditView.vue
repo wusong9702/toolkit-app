@@ -33,6 +33,30 @@
       </div>
     </div>
 
+    <!-- TOTP 动态验证码 -->
+    <div class="card">
+      <div class="section-label">TOTP 动态验证码（可选）</div>
+      <van-field
+        v-model="form.totp"
+        label="密钥"
+        placeholder="粘贴 base32 密钥，如 JBSWY3DPEHPK3PXP"
+        :error-message="totpError"
+      />
+      <div v-if="totpPreview" class="totp-preview">
+        <span class="totp-code">{{ totpPreview.code }}</span>
+        <van-circle
+          :current-rate="(totpPreview.remaining / 30) * 100"
+          :rate="100"
+          :speed="100"
+          :text="String(totpPreview.remaining)"
+          size="36"
+        />
+      </div>
+      <p class="hint">
+        保存后，列表页会实时显示 6 位动态码与倒计时（兼容 Google Authenticator / 1Password 等标准 TOTP）。
+      </p>
+    </div>
+
     <!-- 分组 / 标签 -->
     <div class="card">
       <div class="section-label">分组 / 标签</div>
@@ -61,6 +85,37 @@
         </van-tag>
       </div>
       <p class="hint">分组用于列表页聚合展示，标签用于附加分类。都可自定义。</p>
+    </div>
+
+    <!-- 自定义字段 -->
+    <div class="card">
+      <div class="section-label">自定义字段</div>
+      <div v-for="(f, i) in form.fields" :key="i" class="field-block">
+        <div class="field-line">
+          <van-field v-model="f.label" label="名称" placeholder="如：手机号 / 密保问题" />
+          <van-field
+            v-model="f.value"
+            :type="f.secret && !fieldReveal[i] ? 'password' : 'text'"
+            label="值"
+            placeholder="字段内容"
+          >
+            <template #right-icon>
+              <van-icon
+                v-if="f.secret"
+                :name="fieldReveal[i] ? 'eye-o' : 'closed-eye'"
+                @click="fieldReveal[i] = !fieldReveal[i]"
+              />
+            </template>
+          </van-field>
+        </div>
+        <div class="field-tools">
+          <van-switch v-model="f.secret" size="16" />
+          <span class="field-secret-label">隐藏值</span>
+          <van-button size="mini" plain type="danger" @click="form.fields.splice(i, 1)">删除</van-button>
+        </div>
+      </div>
+      <van-button size="small" plain type="primary" icon="plus" @click="onAddField">添加字段</van-button>
+      <p class="hint">账号本子风格：可附加任意键值（手机号、密保、链接等），敏感字段可设为「隐藏值」。</p>
     </div>
 
     <!-- 失效时间 -->
@@ -130,12 +185,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showToast } from 'vant'
-import { useVaultStore, type VaultEntry } from '@/stores/vault'
+import { useVaultStore, type VaultEntry, type CustomField } from '@/stores/vault'
 import { generatePassword } from '@/utils/crypto'
 import { copySecret } from '@/utils/clipboard'
+import { currentTOTP, isValidBase32 } from '@/utils/totp'
 
 const vault = useVaultStore()
 const route = useRoute()
@@ -149,7 +205,11 @@ const form = ref({
   group: '',
   tags: [] as string[],
   note: '',
+  fields: [] as CustomField[],
+  totp: '',
 })
+/** 自定义字段的「显示/隐藏」开关（不入库，仅界面用） */
+const fieldReveal = ref<Record<number, boolean>>({})
 const tagInput = ref('')
 const showPwd = ref(false)
 const neverExpire = ref(true)
@@ -172,6 +232,8 @@ if (isEdit.value) {
     form.value.group = e.group
     form.value.tags = [...e.tags]
     form.value.note = e.note
+    form.value.fields = (e.fields || []).map((f) => ({ ...f }))
+    form.value.totp = e.totp || ''
     if (e.expiresAt) {
       neverExpire.value = false
       const d = new Date(e.expiresAt)
@@ -207,6 +269,36 @@ function onGenPwd() {
   showToast('已生成 16 位随机密码')
 }
 
+function onAddField() {
+  form.value.fields.push({ label: '', value: '', secret: false })
+}
+
+/* ---------- TOTP 实时预览 ---------- */
+const totpPreview = ref<{ code: string; remaining: number } | null>(null)
+let totpTimer: ReturnType<typeof setInterval> | null = null
+const totpValid = computed(() => isValidBase32(form.value.totp))
+const totpError = computed(() =>
+  form.value.totp.trim() && !totpValid.value
+    ? '密钥格式不正确（应为 base32，仅含 A-Z 与 2-7）'
+    : '',
+)
+async function refreshTotpPreview() {
+  if (!totpValid.value) {
+    totpPreview.value = null
+    return
+  }
+  totpPreview.value = await currentTOTP(form.value.totp)
+  if (!totpTimer) totpTimer = setInterval(() => void refreshTotpPreview(), 1000)
+}
+watch(() => form.value.totp, () => void refreshTotpPreview())
+onMounted(() => void refreshTotpPreview())
+onBeforeUnmount(() => {
+  if (totpTimer) {
+    clearInterval(totpTimer)
+    totpTimer = null
+  }
+})
+
 function onPickDate({ selectedValues }: { selectedValues: string[] }) {
   expireDate.value = selectedValues.join('-')
   showExpirePicker.value = false
@@ -226,6 +318,15 @@ async function onSave() {
     ? 0
     : new Date(`${expireDate.value}T${expireTime.value || '23:59'}`).getTime() || 0
 
+  const fields = form.value.fields
+    .filter((f) => f.label.trim())
+    .map((f) => ({
+      label: f.label.trim(),
+      value: f.value,
+      secret: f.secret === true,
+    }))
+  const totp = form.value.totp.trim().toUpperCase()
+
   saving.value = true
   try {
     if (isEdit.value) {
@@ -237,6 +338,8 @@ async function onSave() {
         tags: form.value.tags,
         note: form.value.note.trim(),
         expiresAt,
+        fields,
+        totp,
       })
       showToast('已保存')
     } else {
@@ -248,6 +351,8 @@ async function onSave() {
         note: form.value.note.trim(),
         expiresAt,
         favorite: false,
+        fields,
+        totp,
       })
       if (form.value.group.trim()) vault.addGroup(form.value.group.trim())
       showToast('已新增')
@@ -286,5 +391,44 @@ async function onSave() {
 }
 .save-row {
   padding: 0 16px 32px;
+}
+/* TOTP 实时预览 */
+.totp-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: #f7f8fa;
+  border-radius: 8px;
+}
+.totp-code {
+  font-family: 'Courier New', monospace;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: #07c160;
+}
+/* 自定义字段 */
+.field-block {
+  border: 1px solid #ebedf0;
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+}
+.field-line {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.field-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+.field-secret-label {
+  font-size: 12px;
+  color: #969799;
 }
 </style>

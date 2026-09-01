@@ -38,15 +38,25 @@
         未配置云同步（WebDAV），数据仅在本机。去「设置」配置后每次编辑自动上云。
       </div>
 
-      <!-- 分组标签栏 -->
-      <div class="group-bar">
+      <!-- 顶部搜索框（账号本子风格：全字段模糊搜索） -->
+      <div class="search-wrap">
+        <van-search
+          v-model="searchKw"
+          placeholder="搜索名称 / 密码 / 备注 / 字段 / TOTP"
+          shape="round"
+          clearable
+        />
+      </div>
+
+      <!-- 分组标签栏（搜索时隐藏） -->
+      <div class="group-bar" v-if="!searching">
         <van-tabs v-model:active="activeGroup" animated swipeable>
           <van-tab v-for="g in groupNames" :key="g" :title="g" />
         </van-tabs>
       </div>
 
-      <!-- 条目列表（拖拽把手可排序） -->
-      <van-empty v-if="!visibleEntries.length" description="暂无条目，点「新增」开始" />
+      <!-- 条目列表（拖拽把手可排序；搜索时禁用拖拽） -->
+      <van-empty v-if="!visibleEntries.length" :description="searching ? '没有匹配的条目' : '暂无条目，点「新增」开始'" />
       <div v-else ref="entryListEl" class="entry-list">
         <div
           v-for="entry in visibleEntries"
@@ -83,6 +93,43 @@
             <van-icon name="copy" class="copy-icon" />
           </div>
 
+          <!-- TOTP 动态验证码（实时刷新） -->
+          <div
+            v-if="totpMap[entry.id]"
+            class="entry-totp"
+            @click="copyText(totpMap[entry.id].code, '动态码')"
+          >
+            <van-icon name="clock-o" class="row-icon" />
+            <span class="totp-code">{{ totpMap[entry.id].code }}</span>
+            <van-circle
+              :current-rate="(totpMap[entry.id].remaining / 30) * 100"
+              :rate="100"
+              :speed="100"
+              :text="String(totpMap[entry.id].remaining)"
+              size="30"
+              class="totp-circle"
+            />
+            <span class="totp-hint">点击复制</span>
+          </div>
+
+          <!-- 自定义字段 -->
+          <div
+            v-for="(f, i) in entry.fields"
+            :key="i"
+            class="entry-field"
+            @click="copyText(f.value, f.label)"
+          >
+            <span class="field-label">{{ f.label }}</span>
+            <span class="field-value">{{ f.secret && !revealed[entry.id + ':' + i] ? '••••••' : f.value }}</span>
+            <van-icon
+              v-if="f.secret"
+              :name="revealed[entry.id + ':' + i] ? 'eye-o' : 'closed-eye'"
+              class="field-eye"
+              @click.stop="toggleReveal(entry.id + ':' + i)"
+            />
+            <van-icon name="copy" class="copy-icon" @click.stop="copyText(f.value, f.label)" />
+          </div>
+
           <div v-if="entry.expiresAt" class="entry-expire" @click="onEdit(entry)">
             <van-icon name="clock-o" class="row-icon" />
             <span>{{ expireLabel(entry) }}</span>
@@ -97,6 +144,17 @@
           </div>
         </div>
       </div>
+
+      <!-- A-Z 字母定位条 -->
+      <div v-if="!searching && visibleEntries.length" class="az-bar">
+        <span
+          v-for="item in indexLetters"
+          :key="item.letter"
+          class="az-letter"
+          :class="{ dim: !item.present }"
+          @click="item.present && jumpTo(item.letter)"
+        >{{ item.letter }}</span>
+      </div>
     </template>
   </div>
 </template>
@@ -108,12 +166,16 @@ import { showConfirmDialog, showToast } from 'vant'
 import Sortable from 'sortablejs'
 import { useVaultStore, type VaultEntry } from '@/stores/vault'
 import { copySecret } from '@/utils/clipboard'
+import { matchEntry } from '@/utils/search'
+import { currentTOTP } from '@/utils/totp'
+import { indexLetter, ALPHABET } from '@/utils/pinyin-index'
 
 const vault = useVaultStore()
 const route = useRoute()
 const router = useRouter()
 
 const activeGroup = ref(0)
+const searchKw = ref('')
 
 const groupNames = computed(() => {
   const set = new Set<string>(['全部'])
@@ -125,29 +187,77 @@ const groupNames = computed(() => {
   return Array.from(set)
 })
 
-// 主页分组区点击进来时带 ?group=xxx，定位到对应标签
-onMounted(() => {
-  const g = route.query.group
-  if (typeof g === 'string' && g) {
-    const idx = groupNames.value.indexOf(g)
-    if (idx >= 0) activeGroup.value = idx
-  }
-  initSortable()
-})
+const searching = computed(() => searchKw.value.trim().length > 0)
 
 const visibleEntries = computed(() => {
+  const kw = searchKw.value.trim()
+  if (kw) return vault.data.entries.filter((e) => matchEntry(e, kw))
   const g = groupNames.value[activeGroup.value]
   if (!g || g === '全部') return vault.data.entries
-  return vault.data.entries.filter(
-    (e) => e.group === g || (e.tags && e.tags.includes(g)),
-  )
+  return vault.data.entries.filter((e) => e.group === g || (e.tags && e.tags.includes(g)))
 })
+
+/* ---------- A-Z 字母定位条 ---------- */
+const entryLetter = (e: VaultEntry) => indexLetter(e.name)
+const letterSet = computed(() => {
+  const s = new Set<string>()
+  visibleEntries.value.forEach((e) => s.add(entryLetter(e)))
+  return s
+})
+const indexLetters = computed(() => {
+  const present = letterSet.value
+  const list = ALPHABET.map((l) => ({ letter: l, present: present.has(l) }))
+  list.push({ letter: '#', present: present.has('#') })
+  return list
+})
+function firstIdByLetter(letter: string): string | null {
+  for (const e of visibleEntries.value) if (entryLetter(e) === letter) return e.id
+  return null
+}
+function jumpTo(letter: string) {
+  const id = firstIdByLetter(letter)
+  if (!id || !entryListEl.value) return
+  const el = entryListEl.value.querySelector(`[data-id="${id}"]`)
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+/* ---------- TOTP 实时刷新 ---------- */
+const totpMap = ref<Record<string, { code: string; remaining: number }>>({})
+let totpTimer: ReturnType<typeof setInterval> | null = null
+async function refreshTotp() {
+  const map: Record<string, { code: string; remaining: number }> = {}
+  for (const e of visibleEntries.value) {
+    if (e.totp) {
+      const r = await currentTOTP(e.totp)
+      if (r) map[e.id] = r
+    }
+  }
+  totpMap.value = map
+}
+function startTotp() {
+  if (totpTimer) return
+  totpTimer = setInterval(refreshTotp, 1000)
+  void refreshTotp()
+}
+function stopTotp() {
+  if (totpTimer) {
+    clearInterval(totpTimer)
+    totpTimer = null
+  }
+}
+
+/* ---------- 自定义字段「显示/隐藏」 ---------- */
+const revealed = ref<Record<string, boolean>>({})
+function toggleReveal(key: string) {
+  revealed.value[key] = !revealed.value[key]
+}
 
 /* ---------- 触屏拖拽排序（SortableJS） ---------- */
 const entryListEl = ref<HTMLElement | null>(null)
 let sortable: Sortable | null = null
 
 function initSortable(): void {
+  if (searching.value) return // 搜索结果不排序
   const el = entryListEl.value
   if (!el || sortable) return
   sortable = Sortable.create(el, {
@@ -203,13 +313,26 @@ function onSortEnd(evt: Sortable.SortableEvent): void {
   showToast('已调整顺序')
 }
 
-// 分组切换 / 锁定状态变化 / 数据变化导致列表重建时，重建 Sortable 实例
-watch([visibleEntries, () => vault.isLocked], () => {
+// 分组切换 / 搜索开关 / 锁定状态变化 / 数据变化导致列表重建时，重建 Sortable 实例
+watch([visibleEntries, () => vault.isLocked, searching], () => {
   destroySortable()
   void nextTick(initSortable)
 })
 
-onBeforeUnmount(destroySortable)
+onMounted(() => {
+  const g = route.query.group
+  if (typeof g === 'string' && g) {
+    const idx = groupNames.value.indexOf(g)
+    if (idx >= 0) activeGroup.value = idx
+  }
+  initSortable()
+  startTotp()
+})
+
+onBeforeUnmount(() => {
+  destroySortable()
+  stopTotp()
+})
 
 function isExpired(e: VaultEntry): boolean {
   return e.expiresAt > 0 && Date.now() > e.expiresAt
@@ -231,6 +354,10 @@ function maskedPassword(pwd: string): string {
 }
 
 async function copyText(text: string, what: string) {
+  if (!text) {
+    showToast('内容为空')
+    return
+  }
   const ok = await copySecret(text)
   showToast(ok ? `已复制${what}，30 秒后自动清除` : `复制失败：${what}请长按手动复制`)
 }
@@ -303,6 +430,9 @@ const syncClass = computed(() => {
 .head-right {
   display: flex;
   gap: 8px;
+}
+.search-wrap {
+  padding: 8px 8px 0;
 }
 .sync-status {
   margin: 0 16px 12px;
@@ -428,6 +558,58 @@ const syncClass = computed(() => {
 .copy-icon {
   color: #1989fa;
 }
+/* TOTP 动态码 */
+.entry-totp {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: #eefaf3;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.totp-code {
+  font-family: 'Courier New', monospace;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: #07c160;
+}
+.totp-circle {
+  margin-left: auto;
+}
+.totp-hint {
+  font-size: 11px;
+  color: #07c160;
+}
+/* 自定义字段 */
+.entry-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: #f7f8fa;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.field-label {
+  font-size: 12px;
+  color: #969799;
+  flex-shrink: 0;
+}
+.field-value {
+  flex: 1;
+  font-size: 14px;
+  color: #323233;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.field-eye {
+  color: #969799;
+}
 .entry-expire {
   display: flex;
   align-items: center;
@@ -450,5 +632,34 @@ const syncClass = computed(() => {
   color: #ee0a24;
   font-size: 13px;
   margin: 8px 0 0;
+}
+/* A-Z 字母定位条 */
+.az-bar {
+  position: fixed;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  z-index: 20;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 8px;
+  padding: 4px 2px;
+  max-height: 80vh;
+  overflow: hidden;
+}
+.az-letter {
+  font-size: 11px;
+  font-weight: 600;
+  color: #1989fa;
+  padding: 1px 3px;
+  cursor: pointer;
+  line-height: 1.3;
+}
+.az-letter.dim {
+  color: #c8c9cc;
+  cursor: default;
 }
 </style>

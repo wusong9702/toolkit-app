@@ -49,6 +49,36 @@
       </p>
     </div>
 
+    <!-- 安全：自动锁定 + 生物识别 -->
+    <div class="card">
+      <div class="section-label">安全</div>
+      <van-cell title="后台自动锁定" :value="autoLockLabel" is-link @click="showAutoLock = true" />
+      <van-cell title="指纹 / 面容解锁" label="开启后可用生物识别代替主密码解锁（仅原生 App 支持）">
+        <template #right-icon>
+          <van-switch v-model="bioOn" :disabled="!bioCapable" @change="onBioChange" />
+        </template>
+      </van-cell>
+      <van-action-sheet
+        v-model:show="showAutoLock"
+        :actions="autoLockActions"
+        cancel-text="取消"
+        description="切到后台超过设定时间后自动锁定"
+        @select="onAutoLockSelect"
+      />
+    </div>
+
+    <!-- 备份：CSV 导出 -->
+    <div class="card">
+      <div class="section-label">备份</div>
+      <p class="hint">
+        把全部条目导出为 CSV（含自定义字段与 TOTP 密钥），可用 Excel 打开或导入其他密码管理器。
+        文件含明文，请妥善保管。
+      </p>
+      <div class="btn-row">
+        <van-button size="small" type="primary" @click="onExportCSV">导出 CSV 备份</van-button>
+      </div>
+    </div>
+
     <!-- 数据概况 -->
     <div class="card">
       <div class="section-label">数据概况</div>
@@ -88,10 +118,11 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { showConfirmDialog, showToast } from 'vant'
 import { useVaultStore } from '@/stores/vault'
 import { testConnection, type ConnectionTestResult } from '@/utils/webdav'
+import { entriesToCSV, downloadCSV } from '@/utils/csv'
 
 const vault = useVaultStore()
 
@@ -194,6 +225,40 @@ function onLockVault() {
   showToast('密码本已锁定')
 }
 
+/* ---------- 自动锁定 / 生物识别 / 备份 ---------- */
+const showAutoLock = ref(false)
+const autoLockActions = [
+  { name: '关闭', sec: 0 },
+  { name: '10 秒', sec: 10 },
+  { name: '30 秒', sec: 30 },
+  { name: '1 分钟', sec: 60 },
+  { name: '5 分钟', sec: 300 },
+]
+const autoLockLabel = computed(() => {
+  const hit = autoLockActions.find((a) => a.sec === vault.autoLockSeconds)
+  return hit ? hit.name : `${vault.autoLockSeconds} 秒`
+})
+function onAutoLockSelect(action: { name: string; sec: number }) {
+  vault.setAutoLockSeconds(action.sec)
+  showAutoLock.value = false
+}
+const bioOn = ref(vault.biometricEnabled)
+const bioCapable = ref(false)
+function onBioChange(on: boolean) {
+  vault.setBiometricEnabled(on)
+  showToast(on ? '已开启，下次解锁后生效' : '已关闭指纹/面容解锁')
+}
+function onExportCSV() {
+  if (!vault.unlocked) {
+    showToast('请先解锁密码本')
+    return
+  }
+  const csv = entriesToCSV(vault.data.entries)
+  const name = `password-vault-${new Date().toISOString().slice(0, 10)}.csv`
+  downloadCSV(name, csv)
+  showToast(`已导出 ${vault.data.entries.length} 条到 CSV`)
+}
+
 async function onResetVault() {
   try {
     await showConfirmDialog({
@@ -227,6 +292,12 @@ onMounted(async () => {
     if (info.build) buildTime.value = `构建号 ${info.build}`
   } catch {
     /* 浏览器环境拿不到原生版本号 */
+  }
+  // 检测设备是否支持生物识别（决定指纹解锁开关是否可用）
+  try {
+    bioCapable.value = await vault.isBiometryAvailable()
+  } catch {
+    bioCapable.value = false
   }
 })
 </script>
