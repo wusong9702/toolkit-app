@@ -175,11 +175,14 @@
 - ✅ 网页版：https://wusong9702.github.io/toolkit-app/ 可访问
 - ✅ Android：正式签名 APK 已可下载安装（自用，不上架）
 - ⏸️ iOS：打包暂停中（workflow 已改仅手动触发）
-- 📌 待办：用户下载 APK 装到手机实测；真机 WebDAV 同步实测
+- ✅ 密码本安全加固：生成密码越界 bug 修复、复制后 30 秒自动清空剪贴板
+- ✅ WebDAV 多设备冲突合并（条目级，两端各改各的取较新版本）
+- ✅ 触屏拖拽排序（SortableJS + 拖拽把手）
+- 📌 待办：用户下载 APK 装到手机实测；真机 WebDAV 同步实测（docs/06 待办已全部清零）
 
 ### 用户的下一步（下载安装 APK）
 
-1. 打开 https://github.com/wusong9702/toolkit-app/actions/runs/33516716252
+1. 打开 https://github.com/wusong9702/toolkit-app/actions/runs/33519952201
 2. 页面底部 **Artifacts** 区下载 `android-build`（zip）
 3. 解压得到 `app-release.apk`，传到手机（微信/QQ/数据线/网盘均可）
 4. 手机点击安装，提示"未知来源"时允许（自签名应用的正常提示）
