@@ -37,6 +37,9 @@ Thumbs.db
 *.jks
 *.p12
 *.mobileprovision
+# 签名密钥的 base64 文件与密码临时文件（同样敏感，禁止提交）
+jks.txt
+.gen-pass.txt
 
 # 打包输出
 *.apk
