@@ -1,0 +1,18 @@
+# 统一换行符为 LF
+# 不加这个，Windows 提交的文件会带 CRLF，
+# .sh 脚本在 Linux/macOS（包括 GitHub Actions）上执行会报 bad interpreter 错误
+* text=auto eol=lf
+
+# 二进制文件不做转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.jks binary
+*.keystore binary
+*.p12 binary
+*.mobileprovision binary
+
+# 锁定文件保持原样
+package-lock.json linguist-generated=true -diff

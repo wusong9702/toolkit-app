@@ -1,0 +1,13 @@
+{
+  "version": "1.0.0",
+  "updatedAt": "2026-09-01",
+  "notice": "这是云端内容示例：修改本文件即可改变 App 内的分类，无需重新发版。",
+  "categories": [
+    { "id": "food", "name": "餐饮", "icon": "🍜", "color": "#ff976a" },
+    { "id": "transport", "name": "交通", "icon": "🚌", "color": "#1989fa" },
+    { "id": "shopping", "name": "购物", "icon": "🛍️", "color": "#ee0a24" },
+    { "id": "life", "name": "生活", "icon": "🏠", "color": "#07c160" },
+    { "id": "fun", "name": "娱乐", "icon": "🎮", "color": "#7232dd" },
+    { "id": "other", "name": "其他", "icon": "📦", "color": "#909399" }
+  ]
+}

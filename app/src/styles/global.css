@@ -1,0 +1,61 @@
+/* 全局样式：只放最基础的，其余交给 Vant */
+:root {
+  --app-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --app-page-bg: #f7f8fa;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  background: var(--app-page-bg);
+  color: #323233;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* 所有页面留出的底部安全区（iPhone 底部横条） */
+.page {
+  min-height: 100%;
+  padding-bottom: calc(60px + var(--app-safe-bottom));
+}
+
+.page-title {
+  margin: 0;
+  padding: 16px 16px 8px;
+  font-size: 20px;
+  font-weight: 600;
+  color: #323233;
+}
+
+.page-desc {
+  margin: 0 0 12px;
+  padding: 0 16px;
+  font-size: 13px;
+  color: #969799;
+}
+
+/* 通用卡片 */
+.card {
+  margin: 12px;
+  padding: 16px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(100, 101, 102, 0.08);
+}
+
+/* 空状态 */
+.empty-tip {
+  padding: 48px 16px;
+  text-align: center;
+  color: #c8c9cc;
+  font-size: 14px;
+}

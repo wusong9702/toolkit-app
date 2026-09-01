@@ -1,0 +1,108 @@
+name: 构建 iOS 安装包
+
+# 这一条是给 Windows 用户准备的救命通道：
+# GitHub 提供的 macOS 虚拟机可以完成 Xcode 构建，绕开"必须有 Mac"的限制。
+#
+# 免费额度：公开仓库不限时；私有仓库每月 2000 分钟（macOS 按 10 倍计费，
+# 也就是实际约 200 分钟），一个包大约 10-15 分钟，够用。
+#
+# 首次使用需要在仓库 Settings → Secrets 里配置下面 5 个值，详见文档 03。
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      export_method:
+        description: '分发方式'
+        required: true
+        default: 'development'
+        type: choice
+        options: [development, ad-hoc, app-store]
+
+jobs:
+  build:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: 生成 Capacitor 平台目录
+        run: |
+          npm ci
+          npm run build
+          [ -d ios ] || npx cap add ios
+          npx cap sync ios
+
+      # 把证书从 Secrets 里还原成文件
+      - name: 导入签名证书
+        env:
+          P12_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          echo "$P12_BASE64" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          security import $RUNNER_TEMP/certificate.p12 \
+            -P "$P12_PASSWORD" -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo "${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}" | base64 --decode \
+            > ~/Library/MobileDevice/Provisioning\ Profiles/build.mobileprovision
+
+      - name: 归档并导出
+        run: |
+          cd ios/App
+          METHOD="${{ github.event.inputs.export_method || 'app-store' }}"
+
+          if [ "$METHOD" = "app-store" ]; then
+            xcodebuild -workspace App.xcworkspace -scheme App \
+              -configuration Release -archivePath $RUNNER_TEMP/App.xcarchive \
+              -destination 'generic/platform=iOS' \
+              archive
+          else
+            xcodebuild -workspace App.xcworkspace -scheme App \
+              -configuration Release -archivePath $RUNNER_TEMP/App.xcarchive \
+              -destination 'generic/platform=iOS' \
+              -allowProvisioningUpdates archive
+          fi
+
+          cat > $RUNNER_TEMP/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>$METHOD</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>teamID</key><string>${{ secrets.IOS_TEAM_ID }}</string>
+          </dict>
+          </plist>
+          EOF
+
+          xcodebuild -exportArchive \
+            -archivePath $RUNNER_TEMP/App.xcarchive \
+            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
+            -exportPath $RUNNER_TEMP/export
+
+      - name: 上传 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: ${{ runner.temp }}/export/*.ipa
+          retention-days: 30
+          if-no-files-found: warn
